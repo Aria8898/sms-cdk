@@ -177,9 +177,78 @@ FutureAdapter    implements SmsProvider   ← 未来扩展
 
 ---
 
-## 九、待定技术方案
+## 九、技术方案
 
-> 待需求确认后补充
+### 部署架构
 
-- 部署平台：Cloudflare（Workers + D1 + Pages）优先，减少成本
-- 备选：自有 VPS（Node.js + PostgreSQL）
+```
+用户 / 管理员浏览器
+        ↓ HTTP
+Cloudflare Pages（前端静态资源）
+        ↓ API 请求
+Cloudflare Workers（后端 API）
+        ↓
+Cloudflare D1（SQLite 数据库）
+        ↓
+SMSPool API（外部，服务端调用，浏览器不可见）
+```
+
+### 域名规划
+
+| 域名 | 用途 |
+|------|------|
+| `api.yourdomain.com` | Cloudflare Workers，唯一后端入口 |
+| `app.yourdomain.com` | 用户兑换页面 |
+| `admin.yourdomain.com` | 管理后台，可加 Cloudflare Access 双重防护 |
+
+### 技术选型
+
+| 层 | 选型 |
+|---|---|
+| 前端 | React + TypeScript + Vite |
+| 后端 | Cloudflare Workers + Hono 框架 |
+| 数据库 | Cloudflare D1（SQLite） |
+| ORM | Drizzle ORM |
+| 样式 | Tailwind CSS |
+| 管理后台认证 | JWT + Cookie |
+| 包管理 | pnpm workspace（monorepo） |
+
+### 项目结构
+
+```
+sms-cdk/
+  apps/
+    web/          # 用户前端（兑换页面）
+    admin/        # 管理后台
+    api/          # Cloudflare Workers（Hono）
+  packages/
+    db/           # Drizzle schema + migrations
+    adapters/     # SMS 平台适配器
+      smspool.ts
+      index.ts    # 统一接口定义
+```
+
+### 安全说明
+
+所有 SMS 平台的 API 调用均在 Workers 服务端执行，浏览器只能看到自有域名的请求，SMSPool API Key、实际调用接口、请求参数对用户完全不可见。
+
+### 并发控制
+
+CDK 兑换时使用 D1 事务保证原子性，防止同一 CDK 被并发超额使用：
+
+```
+BEGIN TRANSACTION
+  1. 查询 CDK 是否有效（剩余次数 > 0，无 pending 订单）
+  2. 插入 order 记录（status = pending）
+COMMIT
+↓
+调用 SMSPool 取号（事务外）
+```
+
+### 免费额度参考
+
+| 服务 | 免费额度 |
+|------|------|
+| Cloudflare Workers | 100,000 请求/天 |
+| Cloudflare D1 | 5GB 存储，500 万行读/天 |
+| Cloudflare Pages | 无限制 |
