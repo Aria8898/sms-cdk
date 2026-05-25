@@ -8,10 +8,12 @@
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
+    "drizzle-orm": "^0.44.1",
     "hono": "^4.7.11"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250525.0",
+    "drizzle-kit": "^0.31.1",
     "typescript": "~5.8.3",
     "wrangler": "^4.15.2"
   }

@@ -2,3 +2,11 @@ name = "sms-cdk-api"
 main = "src/index.ts"
 compatibility_date = "2025-05-25"
 compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sms-cdk-db"
+database_id = "local-placeholder"
+
+[vars]
+ADMIN_USERNAME = "admin"

@@ -1,16 +1,24 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import type { Bindings } from './types'
+import authRoute from './routes/auth'
+import providersRoute from './routes/providers'
+import servicesRoute from './routes/services'
+import cdksRoute from './routes/cdks'
 
-const app = new Hono()
+const app = new Hono<{ Bindings: Bindings }>()
 
-app.use('*', cors())
+app.use('*', cors({
+  origin: '*',
+  allowHeaders: ['Content-Type', 'Authorization'],
+  allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+}))
 
-app.get('/', (c) => {
-  return c.json({ message: 'SMS CDK API', status: 'ok' })
-})
+app.route('/api/auth', authRoute)
+app.route('/api/providers', providersRoute)
+app.route('/api/services', servicesRoute)
+app.route('/api/cdks', cdksRoute)
 
-app.get('/health', (c) => {
-  return c.json({ status: 'ok', timestamp: new Date().toISOString() })
-})
+app.get('/api/health', (c) => c.json({ status: 'ok', timestamp: new Date().toISOString() }))
 
 export default app

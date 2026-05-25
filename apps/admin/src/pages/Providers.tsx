@@ -1,16 +1,5 @@
-import { useState } from 'react'
-
-interface Provider {
-  id: string
-  name: string
-  slug: string
-  serviceCount: number
-  createdAt: string
-}
-
-const initialProviders: Provider[] = [
-  { id: '1', name: 'SMSPool', slug: 'smspool', serviceCount: 3, createdAt: '2025-05-20' },
-]
+import { useState, useEffect } from 'react'
+import { providersApi, type Provider } from '../lib/api'
 
 function toSlug(name: string) {
   return name
@@ -22,29 +11,46 @@ function toSlug(name: string) {
 }
 
 export default function Providers() {
-  const [providers, setProviders] = useState<Provider[]>(initialProviders)
+  const [providers, setProviders] = useState<Provider[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState('')
   const [showForm, setShowForm] = useState(false)
   const [formName, setFormName] = useState('')
   const [formSlug, setFormSlug] = useState('')
+
+  async function loadProviders() {
+    setIsLoading(true)
+    setError('')
+    try {
+      const data = await providersApi.list()
+      setProviders(data)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '加载失败')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadProviders()
+  }, [])
 
   function handleNameChange(val: string) {
     setFormName(val)
     setFormSlug(toSlug(val))
   }
 
-  function handleAdd() {
+  async function handleAdd() {
     if (!formName.trim()) return
-    const newProvider: Provider = {
-      id: String(Date.now()),
-      name: formName.trim(),
-      slug: formSlug || toSlug(formName.trim()),
-      serviceCount: 0,
-      createdAt: new Date().toISOString().slice(0, 10),
+    try {
+      await providersApi.create({ name: formName.trim(), slug: formSlug || toSlug(formName.trim()) })
+      setShowForm(false)
+      setFormName('')
+      setFormSlug('')
+      await loadProviders()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '操作失败')
     }
-    setProviders(prev => [...prev, newProvider])
-    setShowForm(false)
-    setFormName('')
-    setFormSlug('')
   }
 
   function handleCancel() {
@@ -53,9 +59,13 @@ export default function Providers() {
     setFormSlug('')
   }
 
-  function handleDelete(id: string) {
-    if (window.confirm('确认删除该 Provider？')) {
-      setProviders(prev => prev.filter(p => p.id !== id))
+  async function handleDelete(id: string) {
+    if (!window.confirm('确认删除该 Provider？')) return
+    try {
+      await providersApi.delete(id)
+      await loadProviders()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '操作失败')
     }
   }
 
@@ -113,45 +123,51 @@ export default function Providers() {
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-gray-50 border-b border-gray-200">
-              <th className="text-left px-5 py-3 font-medium text-gray-600">名称</th>
-              <th className="text-left px-5 py-3 font-medium text-gray-600">Slug</th>
-              <th className="text-left px-5 py-3 font-medium text-gray-600">关联 Service 数</th>
-              <th className="text-left px-5 py-3 font-medium text-gray-600">创建时间</th>
-              <th className="text-left px-5 py-3 font-medium text-gray-600">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {providers.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="px-5 py-12 text-center text-gray-400">
-                  暂无 Provider，点击右上角按钮添加
-                </td>
+      {isLoading ? (
+        <div className="py-12 text-center text-gray-400 text-sm">加载中...</div>
+      ) : error ? (
+        <div className="py-12 text-center text-red-500 text-sm">{error}</div>
+      ) : (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-200">
+                <th className="text-left px-5 py-3 font-medium text-gray-600">名称</th>
+                <th className="text-left px-5 py-3 font-medium text-gray-600">Slug</th>
+                <th className="text-left px-5 py-3 font-medium text-gray-600">关联 Service 数</th>
+                <th className="text-left px-5 py-3 font-medium text-gray-600">创建时间</th>
+                <th className="text-left px-5 py-3 font-medium text-gray-600">操作</th>
               </tr>
-            ) : (
-              providers.map(p => (
-                <tr key={p.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                  <td className="px-5 py-3 font-medium text-gray-900">{p.name}</td>
-                  <td className="px-5 py-3 text-gray-600 font-mono">{p.slug}</td>
-                  <td className="px-5 py-3 text-gray-600">{p.serviceCount}</td>
-                  <td className="px-5 py-3 text-gray-600">{p.createdAt}</td>
-                  <td className="px-5 py-3">
-                    <button
-                      onClick={() => handleDelete(p.id)}
-                      className="text-red-600 hover:bg-red-50 px-2 py-1 rounded text-sm transition-colors"
-                    >
-                      删除
-                    </button>
+            </thead>
+            <tbody>
+              {providers.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-5 py-12 text-center text-gray-400">
+                    暂无 Provider，点击右上角按钮添加
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+              ) : (
+                providers.map(p => (
+                  <tr key={p.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                    <td className="px-5 py-3 font-medium text-gray-900">{p.name}</td>
+                    <td className="px-5 py-3 text-gray-600 font-mono">{p.slug}</td>
+                    <td className="px-5 py-3 text-gray-600">{p.serviceCount ?? 0}</td>
+                    <td className="px-5 py-3 text-gray-600">{p.createdAt}</td>
+                    <td className="px-5 py-3">
+                      <button
+                        onClick={() => handleDelete(p.id)}
+                        className="text-red-600 hover:bg-red-50 px-2 py-1 rounded text-sm transition-colors"
+                      >
+                        删除
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }

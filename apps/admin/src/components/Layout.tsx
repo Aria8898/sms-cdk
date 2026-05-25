@@ -10,7 +10,7 @@ export default function Layout() {
   const navigate = useNavigate()
 
   function handleLogout() {
-    localStorage.removeItem('admin_authed')
+    localStorage.removeItem('admin_token')
     navigate('/login', { replace: true })
   }
 

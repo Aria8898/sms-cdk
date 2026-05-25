@@ -1,15 +1,27 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { authApi } from '../lib/api'
 
 export default function Login() {
   const navigate = useNavigate()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState('')
 
-  function handleLogin(e: React.FormEvent) {
+  async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
-    localStorage.setItem('admin_authed', '1')
-    navigate('/providers', { replace: true })
+    setError('')
+    setIsLoading(true)
+    try {
+      const data = await authApi.login(username, password)
+      localStorage.setItem('admin_token', data.token)
+      navigate('/providers', { replace: true })
+    } catch {
+      setError('用户名或密码错误')
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   return (
@@ -23,6 +35,10 @@ export default function Login() {
               type="text"
               value={username}
               onChange={e => setUsername(e.target.value)}
+              autoComplete="username"
+              autoCorrect="off"
+              autoCapitalize="none"
+              spellCheck={false}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -32,14 +48,22 @@ export default function Login() {
               type="password"
               value={password}
               onChange={e => setPassword(e.target.value)}
+              autoComplete="current-password"
+              autoCorrect="off"
+              autoCapitalize="none"
+              spellCheck={false}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
+          {error && (
+            <p className="text-sm text-red-600">{error}</p>
+          )}
           <button
             type="submit"
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-lg text-sm transition-colors"
+            disabled={isLoading}
+            className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium py-2.5 rounded-lg text-sm transition-colors"
           >
-            登录
+            {isLoading ? '登录中...' : '登录'}
           </button>
         </form>
       </div>

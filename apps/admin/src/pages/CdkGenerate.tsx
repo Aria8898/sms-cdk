@@ -1,54 +1,55 @@
-import { useState, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-
-const mockServices = [
-  { id: '1', name: 'OpenAI',   shortName: 'OP' },
-  { id: '2', name: 'Twitter',  shortName: 'TW' },
-  { id: '3', name: 'Telegram', shortName: 'TG' },
-]
-
-// 排除易混淆字符：0 O I L 1
-const CHARSET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
-
-function randomSegment(len: number) {
-  let s = ''
-  for (let i = 0; i < len; i++) {
-    s += CHARSET[Math.floor(Math.random() * CHARSET.length)]
-  }
-  return s
-}
-
-function generateCode(prefix: string) {
-  return `${prefix}-${randomSegment(4)}-${randomSegment(4)}-${randomSegment(4)}`
-}
+import { servicesApi, cdksApi, type Service, type Cdk } from '../lib/api'
 
 export default function CdkGenerate() {
   const navigate = useNavigate()
-  const [serviceId, setServiceId] = useState(mockServices[0].id)
+  const [services, setServices] = useState<Service[]>([])
+  const [isLoadingServices, setIsLoadingServices] = useState(true)
+  const [serviceId, setServiceId] = useState('')
   const [usesPerCdk, setUsesPerCdk] = useState(1)
   const [quantity, setQuantity] = useState(10)
-  const [generated, setGenerated] = useState<string[]>([])
+  const [generated, setGenerated] = useState<Cdk[]>([])
   const [copied, setCopied] = useState(false)
+  const [isGenerating, setIsGenerating] = useState(false)
 
-  const selectedService = mockServices.find(s => s.id === serviceId) ?? mockServices[0]
+  useEffect(() => {
+    async function loadServices() {
+      setIsLoadingServices(true)
+      try {
+        const data = await servicesApi.list()
+        setServices(data)
+        if (data.length > 0) {
+          setServiceId(data[0].id)
+        }
+      } catch (err) {
+        alert(err instanceof Error ? err.message : '加载服务列表失败')
+      } finally {
+        setIsLoadingServices(false)
+      }
+    }
+    loadServices()
+  }, [])
 
-  const preview = useMemo(
-    () => `${selectedService.shortName}-XXXX-XXXX-XXXX`,
-    [selectedService.shortName]
-  )
+  const selectedService = services.find(s => s.id === serviceId)
+  const preview = selectedService ? `${selectedService.shortName}-XXXX-XXXX-XXXX` : 'XXXX-XXXX-XXXX-XXXX'
 
-  function handleGenerate() {
-    const codes = Array.from({ length: quantity }, () => generateCode(selectedService.shortName))
-    setGenerated(codes)
-    setCopied(false)
-  }
-
-  function handleRegenerate() {
-    handleGenerate()
+  async function handleGenerate() {
+    if (!serviceId) return
+    setIsGenerating(true)
+    try {
+      const result = await cdksApi.generate({ serviceId, usesPerCdk, quantity })
+      setGenerated(result.cdks)
+      setCopied(false)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '生成失败')
+    } finally {
+      setIsGenerating(false)
+    }
   }
 
   function handleCopyAll() {
-    const text = generated.join('\n')
+    const text = generated.map(c => c.code).join('\n')
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
@@ -74,11 +75,16 @@ export default function CdkGenerate() {
             <select
               value={serviceId}
               onChange={e => setServiceId(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              disabled={isLoadingServices}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
             >
-              {mockServices.map(s => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
+              {isLoadingServices ? (
+                <option>加载中...</option>
+              ) : (
+                services.map(s => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))
+              )}
             </select>
           </div>
           <div>
@@ -113,9 +119,10 @@ export default function CdkGenerate() {
 
           <button
             onClick={handleGenerate}
-            className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
+            disabled={isGenerating || isLoadingServices || !serviceId}
+            className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
           >
-            生成
+            {isGenerating ? '生成中...' : '生成'}
           </button>
         </div>
 
@@ -127,8 +134,9 @@ export default function CdkGenerate() {
             {generated.length > 0 && (
               <div className="flex gap-2">
                 <button
-                  onClick={handleRegenerate}
-                  className="px-3 py-1.5 border border-gray-300 text-gray-600 hover:bg-gray-100 text-xs font-medium rounded-lg transition-colors"
+                  onClick={handleGenerate}
+                  disabled={isGenerating}
+                  className="px-3 py-1.5 border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-50 text-xs font-medium rounded-lg transition-colors"
                 >
                   重新生成
                 </button>
@@ -160,10 +168,10 @@ export default function CdkGenerate() {
                   </tr>
                 </thead>
                 <tbody>
-                  {generated.map((code, idx) => (
-                    <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+                  {generated.map((cdk, idx) => (
+                    <tr key={cdk.id} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="px-4 py-2 text-gray-400">{idx + 1}</td>
-                      <td className="px-4 py-2 font-mono text-gray-800">{code}</td>
+                      <td className="px-4 py-2 font-mono text-gray-800">{cdk.code}</td>
                     </tr>
                   ))}
                 </tbody>
