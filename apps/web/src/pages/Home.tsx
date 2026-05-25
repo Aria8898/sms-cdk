@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { cdkApi } from '../lib/api'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -6,9 +7,11 @@ type Step = 'input' | 'confirm' | 'waiting' | 'success' | 'timeout' | 'error'
 
 interface FlowData {
   cdk: string
+  cdkId: string
   service: string
   remaining: number
   total: number
+  orderId: string
   phone?: string
   expiresIn?: number
   sms?: string
@@ -33,32 +36,41 @@ function pad(n: number) {
 
 const DEFAULT_DATA: FlowData = {
   cdk: '',
+  cdkId: '',
   service: '',
   remaining: 0,
   total: 0,
+  orderId: '',
 }
 
 // ─── StepInput ───────────────────────────────────────────────────────────────
 
 function StepInput({ data, goTo }: StepProps) {
-  const [cdk, setCdk] = useState(data.cdk)
+  const [inputValue, setInputValue] = useState(data.cdk)
+  const [isLoading, setIsLoading] = useState(false)
+  const [errorMsg, setErrorMsg] = useState('')
 
-  const isValid = CDK_REGEX.test(cdk)
-  const hasInput = cdk.trim().length > 0
+  const isValid = CDK_REGEX.test(inputValue)
+  const hasInput = inputValue.trim().length > 0
 
-  function handleSubmit() {
-    if (!isValid) return
-
-    if (cdk === 'OP-ERRO-RROR-TEST') {
-      goTo('error', { errorType: 'invalid' })
-      return
+  async function handleSubmit() {
+    if (!inputValue.trim()) return
+    setIsLoading(true)
+    setErrorMsg('')
+    try {
+      const result = await cdkApi.validate(inputValue.trim())
+      goTo('confirm', {
+        cdk: inputValue.trim(),
+        cdkId: result.cdkId,
+        service: result.service.name,
+        remaining: result.remaining,
+        total: result.total,
+      })
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : '验证失败')
+    } finally {
+      setIsLoading(false)
     }
-    if (cdk === 'OP-USED-USED-TEST') {
-      goTo('error', { errorType: 'exhausted' })
-      return
-    }
-
-    goTo('confirm', { cdk, service: 'OpenAI', remaining: 3, total: 5 })
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -78,14 +90,15 @@ function StepInput({ data, goTo }: StepProps) {
         <div>
           <input
             type="text"
-            value={cdk}
-            onChange={e => setCdk(e.target.value.toUpperCase())}
+            value={inputValue}
+            onChange={e => { setInputValue(e.target.value.toUpperCase()); setErrorMsg('') }}
             onKeyDown={handleKeyDown}
             placeholder="如 OP-XXXX-XXXX-XXXX"
             className={`w-full px-4 py-3 border rounded-lg text-sm focus:outline-none focus:ring-2 transition-colors font-mono tracking-wider ${borderClass}`}
             maxLength={17}
+            disabled={isLoading}
           />
-          {hasInput && isValid && (
+          {hasInput && isValid && !errorMsg && (
             <p className="mt-1.5 text-xs text-green-600 flex items-center gap-1">
               <span>✓</span> 格式正确
             </p>
@@ -97,19 +110,21 @@ function StepInput({ data, goTo }: StepProps) {
           )}
         </div>
 
+        {errorMsg && <p className="text-sm text-red-600">{errorMsg}</p>}
+
         <button
           onClick={handleSubmit}
-          disabled={!isValid}
+          disabled={isLoading || !inputValue.trim()}
           className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium py-3 rounded-lg text-sm transition-colors"
         >
-          立即兑换
+          {isLoading ? '验证中...' : '立即兑换'}
         </button>
       </div>
 
       <p className="mt-6 text-xs text-gray-400 text-center">
         测试用 CDK：
         <button
-          onClick={() => setCdk('OP-A3KF-9ZMR-B72X')}
+          onClick={() => setInputValue('OP-A3KF-9ZMR-B72X')}
           className="font-mono text-blue-400 hover:text-blue-600 underline underline-offset-2 transition-colors"
         >
           OP-A3KF-9ZMR-B72X
@@ -124,6 +139,23 @@ function StepInput({ data, goTo }: StepProps) {
 function StepConfirm({ data, goTo }: StepProps) {
   const { cdk, service, remaining, total } = data
   const dots = Array.from({ length: total }, (_, i) => i < remaining)
+  const [isLoading, setIsLoading] = useState(false)
+
+  async function handleConfirm() {
+    setIsLoading(true)
+    try {
+      const result = await cdkApi.createOrder(data.cdkId)
+      goTo('waiting', {
+        orderId: result.orderId,
+        phone: result.phoneNumber,
+        expiresIn: result.expiresIn,
+      })
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '取号失败，请重试')
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-6">
@@ -180,10 +212,11 @@ function StepConfirm({ data, goTo }: StepProps) {
           返回
         </button>
         <button
-          onClick={() => goTo('waiting', { phone: '+1 (415) 555-0192', expiresIn: 1198 })}
-          className="flex-1 py-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors"
+          onClick={handleConfirm}
+          disabled={isLoading}
+          className="flex-1 py-3 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
         >
-          确认兑换
+          {isLoading ? '取号中...' : '确认兑换'}
         </button>
       </div>
     </div>
@@ -214,6 +247,28 @@ function StepWaiting({ data, goTo }: StepProps) {
       if (timerRef.current) clearInterval(timerRef.current)
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const result = await cdkApi.pollOrder(data.orderId)
+        if (result.status === 'completed') {
+          clearInterval(interval)
+          goTo('success', {
+            sms: result.smsContent ?? '',
+            code: result.verificationCode ?? '',
+          })
+        } else if (result.status === 'expired' || result.status === 'cancelled') {
+          clearInterval(interval)
+          goTo('timeout')
+        }
+        // pending: 继续等待
+      } catch {
+        // 网络错误不中断，继续下次轮询
+      }
+    }, 5000)
+    return () => clearInterval(interval)
+  }, [data.orderId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const minutes = Math.floor(seconds / 60)
   const secs = seconds % 60

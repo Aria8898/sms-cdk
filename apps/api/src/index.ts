@@ -5,6 +5,7 @@ import authRoute from './routes/auth'
 import providersRoute from './routes/providers'
 import servicesRoute from './routes/services'
 import cdksRoute from './routes/cdks'
+import cdkRoute from './routes/cdk'
 
 const app = new Hono<{ Bindings: Bindings }>()
 
@@ -18,6 +19,7 @@ app.route('/api/auth', authRoute)
 app.route('/api/providers', providersRoute)
 app.route('/api/services', servicesRoute)
 app.route('/api/cdks', cdksRoute)
+app.route('/api/cdk', cdkRoute)
 
 app.get('/api/health', (c) => c.json({ status: 'ok', timestamp: new Date().toISOString() }))
 

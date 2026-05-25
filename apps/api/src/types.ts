@@ -3,4 +3,5 @@ export type Bindings = {
   JWT_SECRET: string
   ADMIN_USERNAME: string
   ADMIN_PASSWORD: string
+  SMSPOOL_API_KEY: string
 }
