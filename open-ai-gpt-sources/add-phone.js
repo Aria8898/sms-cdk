@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en-US">
+    <head>
+        <meta charSet="UTF-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+        <meta name="dd-trace-id" content="14377814270980593062"/>
+        <meta name="dd-trace-time" content="1779810152022"/>
+        <link rel="icon" type="image/svg+xml" href="https://auth-cdn.oaistatic.com/assets/favicon-hQZ_bs-n.svg"/>
+        <title>Phone number required - OpenAI</title>
+        <link rel="modulepreload" href="https://auth-cdn.oaistatic.com/assets/manifest-226dd3c2.js"/>
+        <link rel="modulepreload" href="https://auth-cdn.oaistatic.com/assets/entry.client-BfUPXQtc.js"/>
+        <link rel="modulepreload" href="https://auth-cdn.oaistatic.com/assets/statsig-CgmjJPd2.js"/>
+        <link rel="modulepreload" href="https://auth-cdn.oaistatic.com/assets/app-core-DbOxptkt.js"/>
+        <link rel="modulepreload" href="https://auth-cdn.oaistatic.com/assets/react-DFLis9dU.js"/>
+        <link rel="modulepreload" href="https://auth-cdn.oaistatic.com/assets/react-intl-JsFItrOK.js"/>
+        <link rel="modulepreload" href="https://auth-cdn.oaistatic.com/assets/react-router-BfqnT7Lw.js"/>
+        <link rel="modulepreload" href="https://auth-cdn.oaistatic.com/assets/locale.client-CaMtCrUy.js"/>
+        <link rel="modulepreload" href="https://auth-cdn.oaistatic.com/assets/zod-BeXw7Xwl.js"/>
+        <link rel="modulepreload" href="https://auth-cdn.oaistatic.com/assets/app-components-DpXt5EGT.js"/>
+        <link rel="modulepreload" href="https://auth-cdn.oaistatic.com/assets/react-aria-date-picker-deps-DpuCYym0.js"/>
+        <link rel="modulepreload" href="https://auth-cdn.oaistatic.com/assets/react-aria--Kw3-GCi.js"/>
+        <link rel="modulepreload" href="https://auth-cdn.oaistatic.com/assets/app-components-phone-number-input-Cu86KxqT.js"/>
+        <link rel="modulepreload" href="https://auth-cdn.oaistatic.com/assets/phone-number-C6DHDTQA.js"/>
+        <link rel="modulepreload" href="https://auth-cdn.oaistatic.com/assets/app-components-old-app-bDrB7b6x.js"/>
+        <link rel="modulepreload" href="https://auth-cdn.oaistatic.com/assets/datadog-BTgRrIvw.js"/>
+        <link rel="modulepreload" href="https://auth-cdn.oaistatic.com/assets/segment-D7uOZEfY.js"/>
+        <link rel="modulepreload" href="https://auth-cdn.oaistatic.com/assets/root-CmwRoVhK.js"/>
+        <link rel="modulepreload" href="https://auth-cdn.oaistatic.com/assets/client-only-FYnjysJh.js"/>
+        <link rel="modulepreload" href="https://auth-cdn.oaistatic.com/assets/FallbackErrorPage-C9h-Raj6.js"/>
+        <link rel="modulepreload" href="https://auth-cdn.oaistatic.com/assets/layout-DP0G35pQ.js"/>
+        <link rel="modulepreload" href="https://auth-cdn.oaistatic.com/assets/route-MI9bbJkP.js"/>
+        <link rel="modulepreload" href="https://auth-cdn.oaistatic.com/assets/parse-B6ftNv8f.js"/>
+        <link rel="modulepreload" href="https://auth-cdn.oaistatic.com/assets/helpers-Bv1YFeAg.js"/>
+        <script nonce="SHSjnnfKFLFSs8MwAI5P1Q==">
+            ( () => {
+                let i = null;
+                function r(t) {
+                    return t instanceof HTMLButtonElement && t.type === "submit" || t instanceof HTMLInputElement && (t.type === "submit" || t.type === "image")
+                }
+                function u(t, e) {
+                    return t instanceof HTMLElement && r(t) && t.isConnected && t.form === e && !t.disabled
+                }
+                function b(t) {
+                    const e = t.querySelectorAll('button:not([disabled]):not([type]), button[type="submit"]:not([disabled]), input[type="submit"]:not([disabled]), input[type="image"]:not([disabled])');
+                    for (const n of e)
+                        if (u(n, t))
+                            return n;
+                    return null
+                }
+                function l(t, e) {
+                    return u(t.submitter, e) ? t.submitter : u(document.activeElement, e) ? document.activeElement : b(e)
+                }
+                function o() {
+                    document.removeEventListener("submit", m, !0),
+                    delete window.__submitPendingForm
+                }
+                function m(t) {
+                    const e = t.target;
+                    e instanceof HTMLFormElement && (t.preventDefault(),
+                    i = {
+                        form: e,
+                        submitter: l(t, e)
+                    })
+                }
+                document.addEventListener("submit", m, !0),
+                window.__submitPendingForm = function() {
+                    o();
+                    const t = i;
+                    if (i = null,
+                    !t || !t.form.isConnected)
+                        return;
+                    const {form: e} = t
+                      , n = u(t.submitter, e) ? t.submitter : null;
+                    if (typeof e.requestSubmit == "function") {
+                        n ? e.requestSubmit(n) : e.requestSubmit();
+                        return
+                    }
+                    if (typeof SubmitEvent == "function") {
+                        e.dispatchEvent(new SubmitEvent("submit",{
+                            bubbles: !0,
+                            cancelable: !0,
+                            submitter: n
+                        }));
+                        return
+                    }
+                    e.dispatchEvent(new Event("submit",{
+                        bubbles: !0,
+                        cancelable: !0
+                    }))
+                }
+            }
+            )();
+        </script>
+        <link rel="stylesheet" href="https://auth-cdn.oaistatic.com/assets/app-core-nIewZC_t.css"/>
+        <link rel="stylesheet" href="https://auth-cdn.oaistatic.com/assets/app-components-Ckg-3Ze4.css"/>
+        <link rel="stylesheet" href="https://auth-cdn.oaistatic.com/assets/app-components-phone-number-input-BbdvrK4E.css"/>
+        <link rel="stylesheet" href="https://auth-cdn.oaistatic.com/assets/app-components-old-app-DDb2j3Tl.css"/>
+    </head>
+    <body>
+        <div class="_root_l85du_51 _singleSide_l85du_58">
+            <div class="_formContainer_l85du_90">
+                <div class="_titleBlock_l85du_108">
+                    <h1 class="_heading_l85du_133">
+                        <span class="_root_xeddl_1" id="_R_35_">Phone number required</span>
+                    </h1>
+                    <div class="_subTitle_l85du_137">
+                        <span class="_base_dw77f_67 _normal_dw77f_95 _secondary_dw77f_124">To continue, please add a phone number. We will send a one-time code to your number to verify.</span>
+                    </div>
+                </div>
+                <fieldset class="_root_17li2_1">
+                    <form class="_root_1wcdi_1" id="_R_35H1_" noValidate="" aria-labelledby="_R_35_" autoComplete="on" data-discover="true" action="/add-phone" method="post">
+                        <div class="_section_1wcdi_7 _fields_1wcdi_53">
+                            <input type="hidden" id="_R_35H1_-phoneNumber" form="_R_35H1_" name="phoneNumber" value=""/>
+                            <fieldset class="_fieldset_quajc_1">
+                                <legend class="_legend_quajc_5">Phone number</legend>
+                                <div class="_root_1jv2f_1">
+                                    <template data-react-aria-hidden="true">
+                                        <div class="_root_1i5mj_51">
+                                            <span aria-live="polite" aria-atomic="true"></span>
+                                        </div>
+                                    </template>
+                                    <div class="react-aria-Select" data-rac="">
+                                        <div class="_root_1i5mj_51">
+                                            <span class="_hiddenLabel_1i5mj_191" id="react-aria-_R_16jcj5H3_">Phone number country code</span>
+                                            <button id="react-aria-_R_16jcj5H2_" type="button" aria-labelledby="react-aria-_R_16jcj5H7_ react-aria-_R_16jcj5H3_" aria-describedby="react-aria-_R_16jcj5H5_ react-aria-_R_16jcj5H6_" aria-haspopup="listbox" aria-expanded="false" class="_fieldFootprint_1i5mj_59 _target_1i5mj_134 _button_1i5mj_186 _root_l0v7g_1" data-rac="">
+                                                <span id="react-aria-_R_16jcj5H7_" class="react-aria-SelectValue" data-rac="">United States (+1)</span>
+                                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="_icon_1fdmj_55" aria-hidden="true">
+                                                    <path fill-rule="evenodd" clip-rule="evenodd" d="M5.29289 9.29289C5.68342 8.90237 6.31658 8.90237 6.70711 9.29289L12 14.5858L17.2929 9.29289C17.6834 8.90237 18.3166 8.90237 18.7071 9.29289C19.0976 9.68342 19.0976 10.3166 18.7071 10.7071L12.7071 16.7071C12.5196 16.8946 12.2652 17 12 17C11.7348 17 11.4804 16.8946 11.2929 16.7071L5.29289 10.7071C4.90237 10.3166 4.90237 9.68342 5.29289 9.29289Z" fill="currentColor"></path>
+                                                </svg>
+                                            </button>
+                                            <span aria-live="polite" aria-atomic="true"></span>
+                                        </div>
+                                    </div>
+                                    <div style="border:0;clip:rect(0 0 0 0);clip-path:inset(50%);height:1px;margin:-1px;overflow:hidden;padding:0;position:absolute;width:1px;white-space:nowrap" aria-hidden="true" data-react-aria-prevent-focus="true" data-a11y-ignore="aria-hidden-focus" data-testid="hidden-select-container">
+                                        <input type="text" tabindex="-1" style="font-size:16px"/>
+                                        <label>
+                                            <select tabindex="-1">
+                                                <option></option>
+                                                <option value="AF">Afghanistan</option>
+                                                <option value="AX">Åland Islands</option>
+                                                <option value="AL">Albania</option>
+                                                <option value="DZ">Algeria</option>
+                                                <option value="AS">American Samoa</option>
+                                                <option value="AD">Andorra</option>
+                                                <option value="AO">Angola</option>
+                                                <option value="AI">Anguilla</option>
+                                                <option value="AG">Antigua &amp;Barbuda</option>
+                                                <option value="AR">Argentina</option>
+                                                <option value="AM">Armenia</option>
+                                                <option value="AW">Aruba</option>
+                                                <option value="AC">Ascension Island</option>
+                                                <option value="AU">Australia</option>
+                                                <option value="AT">Austria</option>
+                                                <option value="AZ">Azerbaijan</option>
+                                                <option value="BS">Bahamas</option>
+                                                <option value="BH">Bahrain</option>
+                                                <option value="BD">Bangladesh</option>
+                                                <option value="BB">Barbados</option>
+                                                <option value="BY">Belarus</option>
+                                                <option value="BE">Belgium</option>
+                                                <option value="BZ">Belize</option>
+                                                <option value="BJ">Benin</option>
+                                                <option value="BM">Bermuda</option>
+                                                <option value="BT">Bhutan</option>
+                                                <option value="BO">Bolivia</option>
+                                                <option value="BA">Bosnia &amp;Herzegovina</option>
+                                                <option value="BW">Botswana</option>
+                                                <option value="BR">Brazil</option>
+                                                <option value="IO">British Indian Ocean Territory</option>
+                                                <option value="VG">British Virgin Islands</option>
+                                                <option value="BN">Brunei</option>
+                                                <option value="BG">Bulgaria</option>
+                                                <option value="BF">Burkina Faso</option>
+                                                <option value="BI">Burundi</option>
+                                                <option value="KH">Cambodia</option>
+                                                <option value="CM">Cameroon</option>
+                                                <option value="CA">Canada</option>
+                                                <option value="CV">Cape Verde</option>
+                                                <option value="BQ">Caribbean Netherlands</option>
+                                                <option value="KY">Cayman Islands</option>
+                                                <option value="CF">Central African Republic</option>
+                                                <option value="TD">Chad</option>
+                                                <option value="CL">Chile</option>
+                                                <option value="CN">China</option>
+                                                <option value="CX">Christmas Island</option>
+                                                <option value="CC">Cocos (Keeling) Islands</option>
+                                                <option value="CO">Colombia</option>
+                                                <option value="KM">Comoros</option>
+                                                <option value="CG">Congo - Brazzaville</option>
+                                                <option value="CD">Congo - Kinshasa</option>
+                                                <option value="CK">Cook Islands</option>
+                                                <option value="CR">Costa Rica</option>
+                                                <option value="CI">Côte d’Ivoire</option>
+                                                <option value="HR">Croatia</option>
+                                                <option value="CU">Cuba</option>
+                                                <option value="CW">Curaçao</option>
+                                                <option value="CY">Cyprus</option>
+                                                <option value="CZ">Czechia</option>
+                                                <option value="DK">Denmark</option>
+                                                <option value="DJ">Djibouti</option>
+                                                <option value="DM">Dominica</option>
+                                                <option value="DO">Dominican Republic</option>
+                                                <option value="EC">Ecuador</option>
+                                                <option value="EG">Egypt</option>
+                                                <option value="SV">El Salvador</option>
+                                                <option value="GQ">Equatorial Guinea</option>
+                                                <option value="ER">Eritrea</option>
+                                                <option value="EE">Estonia</option>
+                                                <option value="SZ">Eswatini</option>
+                                                <option value="ET">Ethiopia</option>
+                                                <option value="FK">Falkland Islands</option>
+                                                <option value="FO">Faroe Islands</option>
+                                                <option value="FJ">Fiji</option>
+                                                <option value="FI">Finland</option>
+                                                <option value="FR">France</option>
+                                                <option value="GF">French Guiana</option>
+                                                <option value="PF">French Polynesia</option>
+                                                <option value="GA">Gabon</option>
+                                                <option value="GM">Gambia</option>
+                                                <option value="GE">Georgia</option>
+                                                <option value="DE">Germany</option>
+                                                <option value="GH">Ghana</option>
+                                                <option value="GI">Gibraltar</option>
+                                                <option value="GR">Greece</option>
+                                                <option value="GL">Greenland</option>
+                                                <option value="GD">Grenada</option>
+                                                <option value="GP">Guadeloupe</option>
+                                                <option value="GU">Guam</option>
+                                                <option value="GT">Guatemala</option>
+                                                <option value="GG">Guernsey</option>
+                                                <option value="GN">Guinea</option>
+                                                <option value="GW">Guinea-Bissau</option>
+                                                <option value="GY">Guyana</option>
+                                                <option value="HT">Haiti</option>
+                                                <option value="HN">Honduras</option>
+                                                <option value="HK">Hong Kong SAR China</option>
+                                                <option value="HU">Hungary</option>
+                                                <option value="IS">Iceland</option>
+                                                <option value="IN">India</option>
+                                                <option value="ID">Indonesia</option>
+                                                <option value="IR">Iran</option>
+                                                <option value="IQ">Iraq</option>
+                                                <option value="IE">Ireland</option>
+                                                <option value="IM">Isle of Man</option>
+                                                <option value="IL">Israel</option>
+                                                <option value="IT">Italy</option>
+                                                <option value="JM">Jamaica</option>
+                                                <option value="JP">Japan</option>
+                                                <option value="JE">Jersey</option>
+                                                <option value="JO">Jordan</option>
+                                                <option value="KZ">Kazakhstan</option>
+                                                <option value="KE">Kenya</option>
+                                                <option value="KI">Kiribati</option>
+                                                <option value="XK">Kosovo</option>
+                                                <option value="KW">Kuwait</option>
+                                                <option value="KG">Kyrgyzstan</option>
+                                                <option value="LA">Laos</option>
+                                                <option value="LV">Latvia</option>
+                                                <option value="LB">Lebanon</option>
+                                                <option value="LS">Lesotho</option>
+                                                <option value="LR">Liberia</option>
+                                                <option value="LY">Libya</option>
+                                                <option value="LI">Liechtenstein</option>
+                                                <option value="LT">Lithuania</option>
+                                                <option value="LU">Luxembourg</option>
+                                                <option value="MO">Macao SAR China</option>
+                                                <option value="MG">Madagascar</option>
+                                                <option value="MW">Malawi</option>
+                                                <option value="MY">Malaysia</option>
+                                                <option value="MV">Maldives</option>
+                                                <option value="ML">Mali</option>
+                                                <option value="MT">Malta</option>
+                                                <option value="MH">Marshall Islands</option>
+                                                <option value="MQ">Martinique</option>
+                                                <option value="MR">Mauritania</option>
+                                                <option value="MU">Mauritius</option>
+                                                <option value="YT">Mayotte</option>
+                                                <option value="MX">Mexico</option>
+                                                <option value="FM">Micronesia</option>
+                                                <option value="MD">Moldova</option>
+                                                <option value="MC">Monaco</option>
+                                                <option value="MN">Mongolia</option>
+                                                <option value="ME">Montenegro</option>
+                                                <option value="MS">Montserrat</option>
+                                                <option value="MA">Morocco</option>
+                                                <option value="MZ">Mozambique</option>
+                                                <option value="MM">Myanmar (Burma)</option>
+                                                <option value="NA">Namibia</option>
+                                                <option value="NR">Nauru</option>
+                                                <option value="NP">Nepal</option>
+                                                <option value="NL">Netherlands</option>
+                                                <option value="NC">New Caledonia</option>
+                                                <option value="NZ">New Zealand</option>
+                                                <option value="NI">Nicaragua</option>
+                                                <option value="NE">Niger</option>
+                                                <option value="NG">Nigeria</option>
+                                                <option value="NU">Niue</option>
+                                                <option value="NF">Norfolk Island</option>
+                                                <option value="KP">North Korea</option>
+                                                <option value="MK">North Macedonia</option>
+                                                <option value="MP">Northern Mariana Islands</option>
+                                                <option value="NO">Norway</option>
+                                                <option value="OM">Oman</option>
+                                                <option value="PK">Pakistan</option>
+                                                <option value="PW">Palau</option>
+                                                <option value="PS">Palestinian Territories</option>
+                                                <option value="PA">Panama</option>
+                                                <option value="PG">Papua New Guinea</option>
+                                                <option value="PY">Paraguay</option>
+                                                <option value="PE">Peru</option>
+                                                <option value="PH">Philippines</option>
+                                                <option value="PL">Poland</option>
+                                                <option value="PT">Portugal</option>
+                                                <option value="PR">Puerto Rico</option>
+                                                <option value="QA">Qatar</option>
+                                                <option value="RE">Réunion</option>
+                                                <option value="RO">Romania</option>
+                                                <option value="RU">Russia</option>
+                                                <option value="RW">Rwanda</option>
+                                                <option value="WS">Samoa</option>
+                                                <option value="SM">San Marino</option>
+                                                <option value="ST">São Tomé &amp;Príncipe</option>
+                                                <option value="SA">Saudi Arabia</option>
+                                                <option value="SN">Senegal</option>
+                                                <option value="RS">Serbia</option>
+                                                <option value="SC">Seychelles</option>
+                                                <option value="SL">Sierra Leone</option>
+                                                <option value="SG">Singapore</option>
+                                                <option value="SX">Sint Maarten</option>
+                                                <option value="SK">Slovakia</option>
+                                                <option value="SI">Slovenia</option>
+                                                <option value="SB">Solomon Islands</option>
+                                                <option value="SO">Somalia</option>
+                                                <option value="ZA">South Africa</option>
+                                                <option value="KR">South Korea</option>
+                                                <option value="SS">South Sudan</option>
+                                                <option value="ES">Spain</option>
+                                                <option value="LK">Sri Lanka</option>
+                                                <option value="BL">St. Barthélemy</option>
+                                                <option value="SH">St. Helena</option>
+                                                <option value="KN">St. Kitts &amp;Nevis</option>
+                                                <option value="LC">St. Lucia</option>
+                                                <option value="MF">St. Martin</option>
+                                                <option value="PM">St. Pierre &amp;Miquelon</option>
+                                                <option value="VC">St. Vincent &amp;Grenadines</option>
+                                                <option value="SD">Sudan</option>
+                                                <option value="SR">Suriname</option>
+                                                <option value="SJ">Svalbard &amp;Jan Mayen</option>
+                                                <option value="SE">Sweden</option>
+                                                <option value="CH">Switzerland</option>
+                                                <option value="SY">Syria</option>
+                                                <option value="TW">Taiwan</option>
+                                                <option value="TJ">Tajikistan</option>
+                                                <option value="TZ">Tanzania</option>
+                                                <option value="TH">Thailand</option>
+                                                <option value="TL">Timor-Leste</option>
+                                                <option value="TG">Togo</option>
+                                                <option value="TK">Tokelau</option>
+                                                <option value="TO">Tonga</option>
+                                                <option value="TT">Trinidad &amp;Tobago</option>
+                                                <option value="TA">Tristan da Cunha</option>
+                                                <option value="TN">Tunisia</option>
+                                                <option value="TR">Türkiye</option>
+                                                <option value="TM">Turkmenistan</option>
+                                                <option value="TC">Turks &amp;Caicos Islands</option>
+                                                <option value="TV">Tuvalu</option>
+                                                <option value="VI">U.S. Virgin Islands</option>
+                                                <option value="UG">Uganda</option>
+                                                <option value="UA">Ukraine</option>
+                                                <option value="AE">United Arab Emirates</option>
+                                                <option value="GB">United Kingdom</option>
+                                                <option value="US" selected="">United States</option>
+                                                <option value="UY">Uruguay</option>
+                                                <option value="UZ">Uzbekistan</option>
+                                                <option value="VU">Vanuatu</option>
+                                                <option value="VA">Vatican City</option>
+                                                <option value="VE">Venezuela</option>
+                                                <option value="VN">Vietnam</option>
+                                                <option value="WF">Wallis &amp;Futuna</option>
+                                                <option value="EH">Western Sahara</option>
+                                                <option value="YE">Yemen</option>
+                                                <option value="ZM">Zambia</option>
+                                                <option value="ZW">Zimbabwe</option>
+                                            </select>
+                                        </label>
+                                    </div>
+                                    <div class="PhoneInputInput" data-rac="">
+                                        <div class="_root_1i5mj_51">
+                                            <div class="_fieldFootprint_1i5mj_59 _typeable_1i5mj_74 _hasValue_1i5mj_155">
+                                                <label class="_typeableLabel_1i5mj_74" id="react-aria-_R_ajcj5H1_" for="tel">
+                                                    <div class="_typeableLabelTextPositioner_1i5mj_88">
+                                                        <div class="_typeableLabelText_1i5mj_88">Phone number</div>
+                                                    </div>
+                                                </label>
+                                                <span class="_inputDecorationCountryCode_quajc_25 _base_dw77f_67 _normal_dw77f_95 _secondary_dw77f_124">1</span>
+                                                <input aria-describedby="react-aria-_R_ajcj5H3_ react-aria-_R_ajcj5H4_" id="tel" type="tel" autoComplete="tel" placeholder="Phone number" aria-label="National number" aria-labelledby="react-aria-_R_ajcj5H1_" class="_input_1kwl2_1 _target_1i5mj_134" data-rac="" name="__reservedForPhoneNumberInput_tel" value=""/>
+                                            </div>
+                                            <span aria-live="polite" aria-atomic="true"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </fieldset>
+                            <div aria-live="polite" aria-atomic="true" class="_hiddenErrorsContainer_1wcdi_38"></div>
+                        </div>
+                        <div class="_section_1wcdi_7 _ctas_1wcdi_13">
+                            <div class="_wrapper_2sicu_55">
+                                <button class="_root_2sicu_62 _primary_2sicu_111" aria-describedby="" aria-disabled="false" data-dd-action-name="Continue" type="submit">Continue</button>
+                            </div>
+                        </div>
+                    </form>
+                </fieldset>
+                <div class="_footer_l85du_141">
+                    <span class="_small_dw77f_57 _normal_dw77f_95 _secondary_dw77f_124">
+                        <a href="https://openai.com/policies/terms-of-use">Terms of Use</a>
+                        <span class="_separator_l85du_146 _base_dw77f_67 _normal_dw77f_95 _secondary_dw77f_124"></span>
+                        <a href="https://openai.com/policies/privacy-policy">Privacy Policy</a>
+                    </span>
+                </div>
+            </div>
+        </div>
+        <script nonce="SHSjnnfKFLFSs8MwAI5P1Q==">
+            ( (storageKey2, restoreKey) => {
+                if (!window.history.state || !window.history.state.key) {
+                    let key = Math.random().toString(32).slice(2);
+                    window.history.replaceState({
+                        key
+                    }, "");
+                }
+                try {
+                    let positions = JSON.parse(sessionStorage.getItem(storageKey2) || "{}");
+                    let storedY = positions[restoreKey || window.history.state.key];
+                    if (typeof storedY === "number") {
+                        window.scrollTo(0, storedY);
+                    }
+                } catch (error) {
+                    console.error(error);
+                    sessionStorage.removeItem(storageKey2);
+                }
+            }
+            )("react-router-scroll-positions", null)
+        </script>
+        <script id="bootstrap-inert-script" type="application/json">
+            {
+                "track": "stable",
+                "requestStartMillis": 1779810152022,
+                "isSsrEnabled": true,
+                "statsigClientInitData": {
+                    "identity": {
+                        "clientId": "app_EMoamEEZ73f0CkXaXp7hrann",
+                        "appNameEnum": "oaicli",
+                        "originator": "codex_vscode",
+                        "sessionLoggingId": "server_27c39350-2b7a-40b6-894c-34aab5304aae",
+                        "deviceId": "166c9272-2998-4564-8d04-6b03daf63c95",
+                        "locale": "en-US",
+                        "ip": "148.170.86.55",
+                        "country": "US",
+                        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+                        "route": "/add-phone"
+                    },
+                    "bootstrap": "{\"can_record_session\":true,\"dynamic_configs\":{\"1063781658\":{\"group\":\"default\",\"id_type\":\"stableID\",\"is_device_based\":true,\"name\":\"1063781658\",\"passed\":false,\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":{\"countryCodes\":[\"AD\",\"AE\",\"AF\",\"AG\",\"AI\",\"AL\",\"AM\",\"AN\",\"AO\",\"AR\",\"AS\",\"AT\",\"AU\",\"AW\",\"AX\",\"AZ\",\"BA\",\"BB\",\"BD\",\"BE\",\"BF\",\"BG\",\"BH\",\"BI\",\"BJ\",\"BL\",\"BM\",\"BN\",\"BO\",\"BQ\",\"BR\",\"BS\",\"BT\",\"BW\",\"BZ\",\"CA\",\"CC\",\"CD\",\"CF\",\"CG\",\"CH\",\"CI\",\"CK\",\"CL\",\"CM\",\"CO\",\"CR\",\"CV\",\"CW\",\"CX\",\"CY\",\"CZ\",\"DE\",\"DJ\",\"DK\",\"DM\",\"DO\",\"DZ\",\"EC\",\"EE\",\"EG\",\"EH\",\"ER\",\"ES\",\"ET\",\"FI\",\"FJ\",\"FK\",\"FM\",\"FO\",\"FR\",\"GA\",\"GB\",\"GD\",\"GE\",\"GF\",\"GG\",\"GH\",\"GI\",\"GL\",\"GM\",\"GN\",\"GP\",\"GQ\",\"GR\",\"GT\",\"GU\",\"GW\",\"GY\",\"HN\",\"HR\",\"HT\",\"HU\",\"ID\",\"IE\",\"IL\",\"IM\",\"IN\",\"IO\",\"IQ\",\"IS\",\"IT\",\"JE\",\"JM\",\"JO\",\"JP\",\"KE\",\"KG\",\"KH\",\"KI\",\"KM\",\"KN\",\"KR\",\"KW\",\"KY\",\"KZ\",\"LA\",\"LB\",\"LC\",\"LI\",\"LK\",\"LR\",\"LS\",\"LT\",\"LU\",\"LV\",\"LY\",\"MA\",\"MC\",\"MD\",\"ME\",\"MF\",\"MG\",\"MH\",\"MK\",\"ML\",\"MM\",\"MN\",\"MP\",\"MQ\",\"MR\",\"MS\",\"MT\",\"MU\",\"MV\",\"MW\",\"MX\",\"MY\",\"MZ\",\"NA\",\"NC\",\"NE\",\"NF\",\"NG\",\"NI\",\"NL\",\"NO\",\"NP\",\"NR\",\"NU\",\"NZ\",\"OM\",\"PA\",\"PE\",\"PF\",\"PG\",\"PH\",\"PK\",\"PL\",\"PM\",\"PN\",\"PR\",\"PS\",\"PT\",\"PW\",\"PY\",\"QA\",\"RE\",\"RO\",\"RS\",\"RW\",\"SA\",\"SB\",\"SC\",\"SD\",\"SE\",\"SG\",\"SH\",\"SI\",\"SJ\",\"SK\",\"SL\",\"SM\",\"SN\",\"SO\",\"SR\",\"SS\",\"ST\",\"SV\",\"SX\",\"SZ\",\"TC\",\"TD\",\"TF\",\"TG\",\"TH\",\"TJ\",\"TK\",\"TL\",\"TM\",\"TN\",\"TO\",\"TR\",\"TT\",\"TV\",\"TW\",\"TZ\",\"UA\",\"UG\",\"UM\",\"US\",\"UY\",\"UZ\",\"VA\",\"VC\",\"VG\",\"VI\",\"VN\",\"VU\",\"WF\",\"WS\",\"XK\",\"YE\",\"YT\",\"YU\",\"ZA\",\"ZM\",\"ZW\"]}},\"111706139\":{\"group\":\"default\",\"id_type\":\"userID\",\"is_device_based\":false,\"name\":\"111706139\",\"passed\":false,\"rule_id\":\"default\",\"secondary_exposures\":[{\"gate\":\"444232970\",\"gateValue\":\"false\",\"ruleID\":\"gbNhJYZt2LT0MMPpBwPnn\"}],\"value\":{\"enabled\":true,\"kind\":\"social\",\"loginStrategy\":\"existing_user\",\"name\":\"microsoft\",\"tempDisabled\":false}},\"1119573454\":{\"group\":\"default\",\"id_type\":\"userID\",\"is_device_based\":false,\"name\":\"1119573454\",\"passed\":false,\"rule_id\":\"default\",\"secondary_exposures\":[{\"gate\":\"4092543409\",\"gateValue\":\"false\",\"ruleID\":\"default\"},{\"gate\":\"444232970\",\"gateValue\":\"false\",\"ruleID\":\"gbNhJYZt2LT0MMPpBwPnn\"}],\"value\":{\"enabled\":true,\"kind\":\"social\",\"loginStrategy\":\"new_user\",\"name\":\"microsoft\",\"tempDisabled\":false}},\"1165494509\":{\"group\":\"default\",\"id_type\":\"userID\",\"is_device_based\":false,\"name\":\"1165494509\",\"passed\":false,\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":{\"enabled\":true,\"kind\":\"username\",\"loginStrategy\":\"existing_user\",\"name\":\"phone_number\",\"tempDisabled\":false}},\"1341269548\":{\"group\":\"default\",\"id_type\":\"userID\",\"is_device_based\":false,\"name\":\"1341269548\",\"passed\":false,\"rule_id\":\"default\",\"secondary_exposures\":[{\"gate\":\"295757309\",\"gateValue\":\"false\",\"ruleID\":\"6CYqzLNR69kOtn13xAfiry\"}],\"value\":{\"enabled\":true,\"kind\":\"social\",\"loginStrategy\":\"existing_user\",\"name\":\"google\",\"tempDisabled\":false}},\"2025884078\":{\"group\":\"default\",\"id_type\":\"userID\",\"is_device_based\":false,\"name\":\"2025884078\",\"passed\":false,\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":{\"sms\":[\"US\",\"CA\",\"JP\",\"KR\",\"FR\",\"TW\",\"TH\",\"FK\",\"NU\",\"TL\",\"VU\",\"SM\"],\"whatsapp\":[\"US\",\"IN\",\"CO\",\"GB\",\"BR\",\"MX\",\"AR\",\"DE\",\"SE\",\"HU\",\"PH\",\"AU\",\"CZ\",\"IQ\",\"UA\",\"AZ\",\"MA\",\"PL\",\"RO\",\"BE\",\"PT\",\"GR\",\"IT\",\"AT\",\"CL\",\"CH\",\"ES\",\"NL\",\"TR\",\"AE\",\"SG\",\"IL\",\"ZA\",\"KE\",\"PM\",\"GL\",\"NF\",\"AS\",\"MS\",\"NR\",\"NZ\",\"VI\",\"GU\",\"MM\",\"BT\",\"CK\",\"MH\",\"AI\",\"FM\",\"LA\",\"EE\",\"TV\",\"VG\",\"PR\",\"PW\",\"WF\",\"KI\",\"NP\",\"LT\",\"GG\",\"LV\",\"BM\",\"PF\",\"JE\",\"KY\",\"IM\",\"PG\",\"SB\",\"IS\",\"GE\",\"BQ\",\"NC\",\"TC\",\"NI\",\"CW\",\"AW\",\"SV\",\"BS\",\"SX\",\"MD\",\"FJ\",\"TD\",\"WS\",\"ER\",\"TO\",\"SS\",\"FO\",\"ST\",\"NO\",\"VC\",\"SK\",\"KN\",\"FI\",\"DM\",\"LC\",\"TT\",\"AG\",\"GD\",\"SR\",\"BB\",\"GY\",\"BN\",\"GT\",\"SO\",\"NE\",\"RS\",\"CV\",\"DK\",\"BJ\",\"CI\",\"BZ\",\"BA\",\"GQ\",\"GA\",\"DJ\",\"MR\",\"RE\",\"GP\",\"MQ\",\"GF\",\"IE\",\"DO\",\"PA\",\"TN\",\"YT\",\"XK\",\"GM\",\"MK\",\"CG\",\"NA\",\"HR\",\"UY\",\"GI\",\"CR\",\"LR\",\"MW\",\"AD\",\"SC\",\"LS\",\"AL\",\"BH\",\"LI\",\"SZ\",\"LU\",\"CD\",\"OM\",\"MV\",\"BW\",\"CY\",\"MC\",\"KW\",\"PY\",\"MT\",\"TZ\",\"RW\",\"QA\",\"YE\",\"KZ\",\"TF\"]}},\"2155326647\":{\"group\":\"default\",\"id_type\":\"userID\",\"is_device_based\":false,\"name\":\"2155326647\",\"passed\":false,\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":{\"connectors\":[\"google_calendar_connector\",\"gmail_connector\",\"gmail_connector\"]}},\"2179954254\":{\"group\":\"default\",\"id_type\":\"stableID\",\"is_device_based\":true,\"name\":\"2179954254\",\"passed\":false,\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":{}},\"2197428282\":{\"group\":\"default\",\"id_type\":\"userID\",\"is_device_based\":false,\"name\":\"2197428282\",\"passed\":false,\"rule_id\":\"default\",\"secondary_exposures\":[{\"gate\":\"4092543409\",\"gateValue\":\"false\",\"ruleID\":\"default\"},{\"gate\":\"1584773534\",\"gateValue\":\"false\",\"ruleID\":\"0EJsCp3GoICPEDkX4u1bn\"}],\"value\":{\"enabled\":true,\"kind\":\"social\",\"loginStrategy\":\"new_user\",\"name\":\"apple\",\"tempDisabled\":false}},\"2201018492\":{\"group\":\"default\",\"id_type\":\"stableID\",\"is_device_based\":true,\"name\":\"2201018492\",\"passed\":false,\"rule_id\":\"default\",\"secondary_exposures\":[{\"gate\":\"2291893020\",\"gateValue\":\"false\",\"ruleID\":\"3f01dLWqO4W6g7Di4B3RpH\"}],\"value\":{\"enabled\":true,\"kind\":\"username\",\"loginStrategy\":\"new_user\",\"name\":\"email\",\"tempDisabled\":false}},\"2223007465\":{\"group\":\"default\",\"id_type\":\"stableID\",\"is_device_based\":true,\"name\":\"2223007465\",\"passed\":false,\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":{\"redirect_url\":\"\"}},\"232171259\":{\"group\":\"default\",\"id_type\":\"userID\",\"is_device_based\":false,\"name\":\"232171259\",\"passed\":false,\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":{\"AD\":[\"whatsapp\"],\"AE\":[\"whatsapp\"],\"AG\":[\"whatsapp\"],\"AI\":[\"whatsapp\"],\"AL\":[\"whatsapp\"],\"AR\":[\"whatsapp\"],\"AS\":[\"whatsapp\"],\"AT\":[\"whatsapp\"],\"AU\":[\"whatsapp\"],\"AW\":[\"whatsapp\"],\"AZ\":[\"whatsapp\"],\"BA\":[\"whatsapp\"],\"BB\":[\"whatsapp\"],\"BE\":[\"whatsapp\"],\"BH\":[\"whatsapp\"],\"BJ\":[\"whatsapp\"],\"BM\":[\"whatsapp\"],\"BN\":[\"whatsapp\"],\"BQ\":[\"whatsapp\"],\"BR\":[\"whatsapp\"],\"BS\":[\"whatsapp\"],\"BT\":[\"whatsapp\"],\"BW\":[\"whatsapp\"],\"BZ\":[\"whatsapp\"],\"CA\":[\"sms\"],\"CD\":[\"whatsapp\"],\"CG\":[\"whatsapp\"],\"CH\":[\"whatsapp\"],\"CI\":[\"whatsapp\"],\"CK\":[\"whatsapp\"],\"CL\":[\"whatsapp\"],\"CO\":[\"whatsapp\"],\"CR\":[\"whatsapp\"],\"CW\":[\"whatsapp\"],\"CY\":[\"whatsapp\"],\"CZ\":[\"whatsapp\"],\"DE\":[\"whatsapp\"],\"DJ\":[\"whatsapp\"],\"DK\":[\"whatsapp\"],\"DM\":[\"whatsapp\"],\"DO\":[\"whatsapp\"],\"EE\":[\"whatsapp\"],\"ER\":[\"whatsapp\"],\"ES\":[\"whatsapp\"],\"FI\":[\"whatsapp\"],\"FJ\":[\"whatsapp\"],\"FK\":[\"sms\"],\"FM\":[\"whatsapp\"],\"FO\":[\"whatsapp\"],\"FR\":[\"sms\"],\"GA\":[\"whatsapp\"],\"GB\":[\"whatsapp\"],\"GD\":[\"whatsapp\"],\"GE\":[\"whatsapp\"],\"GF\":[\"whatsapp\"],\"GG\":[\"whatsapp\"],\"GI\":[\"whatsapp\"],\"GL\":[\"whatsapp\"],\"GM\":[\"whatsapp\"],\"GP\":[\"whatsapp\"],\"GQ\":[\"whatsapp\"],\"GR\":[\"whatsapp\"],\"GT\":[\"whatsapp\"],\"GU\":[\"whatsapp\"],\"GY\":[\"whatsapp\"],\"HR\":[\"whatsapp\"],\"HU\":[\"whatsapp\"],\"IE\":[\"whatsapp\"],\"IL\":[\"whatsapp\"],\"IM\":[\"whatsapp\"],\"IN\":[\"whatsapp\"],\"IQ\":[\"whatsapp\"],\"IS\":[\"whatsapp\"],\"IT\":[\"whatsapp\"],\"JE\":[\"whatsapp\"],\"JP\":[\"sms\"],\"KE\":[\"whatsapp\"],\"KI\":[\"whatsapp\"],\"KN\":[\"whatsapp\"],\"KR\":[\"sms\"],\"KW\":[\"whatsapp\"],\"KY\":[\"whatsapp\"],\"KZ\":[\"whatsapp\"],\"LA\":[\"whatsapp\"],\"LC\":[\"whatsapp\"],\"LI\":[\"whatsapp\"],\"LR\":[\"whatsapp\"],\"LS\":[\"whatsapp\"],\"LT\":[\"whatsapp\"],\"LU\":[\"whatsapp\"],\"LV\":[\"whatsapp\"],\"MA\":[\"whatsapp\"],\"MC\":[\"whatsapp\"],\"MD\":[\"whatsapp\"],\"MH\":[\"whatsapp\"],\"MK\":[\"whatsapp\"],\"MM\":[\"whatsapp\"],\"MQ\":[\"whatsapp\"],\"MR\":[\"whatsapp\"],\"MS\":[\"whatsapp\"],\"MT\":[\"whatsapp\"],\"MV\":[\"whatsapp\"],\"MW\":[\"whatsapp\"],\"MX\":[\"whatsapp\"],\"NA\":[\"whatsapp\"],\"NC\":[\"whatsapp\"],\"NE\":[\"whatsapp\"],\"NF\":[\"whatsapp\"],\"NI\":[\"whatsapp\"],\"NL\":[\"whatsapp\"],\"NO\":[\"whatsapp\"],\"NP\":[\"whatsapp\"],\"NR\":[\"whatsapp\"],\"NU\":[\"sms\"],\"NZ\":[\"whatsapp\"],\"OM\":[\"whatsapp\"],\"PA\":[\"whatsapp\"],\"PF\":[\"whatsapp\"],\"PG\":[\"whatsapp\"],\"PH\":[\"whatsapp\"],\"PL\":[\"whatsapp\"],\"PM\":[\"whatsapp\"],\"PR\":[\"whatsapp\"],\"PT\":[\"whatsapp\"],\"PW\":[\"whatsapp\"],\"PY\":[\"whatsapp\"],\"QA\":[\"whatsapp\"],\"RE\":[\"whatsapp\"],\"RO\":[\"whatsapp\"],\"RS\":[\"whatsapp\"],\"RW\":[\"whatsapp\"],\"SB\":[\"whatsapp\"],\"SC\":[\"whatsapp\"],\"SE\":[\"whatsapp\"],\"SG\":[\"whatsapp\"],\"SK\":[\"whatsapp\"],\"SM\":[\"sms\"],\"SO\":[\"whatsapp\"],\"SR\":[\"whatsapp\"],\"SS\":[\"whatsapp\"],\"ST\":[\"whatsapp\"],\"SV\":[\"whatsapp\"],\"SX\":[\"whatsapp\"],\"SZ\":[\"whatsapp\"],\"TC\":[\"whatsapp\"],\"TD\":[\"whatsapp\"],\"TF\":[\"whatsapp\"],\"TH\":[\"sms\"],\"TL\":[\"sms\"],\"TN\":[\"whatsapp\"],\"TO\":[\"whatsapp\"],\"TR\":[\"whatsapp\"],\"TT\":[\"whatsapp\"],\"TV\":[\"whatsapp\"],\"TW\":[\"sms\"],\"TZ\":[\"whatsapp\"],\"UA\":[\"whatsapp\"],\"US\":[\"sms\",\"whatsapp\"],\"UY\":[\"whatsapp\"],\"VC\":[\"whatsapp\"],\"VG\":[\"whatsapp\"],\"VI\":[\"whatsapp\"],\"VU\":[\"sms\"],\"WF\":[\"whatsapp\"],\"WS\":[\"whatsapp\"],\"XK\":[\"whatsapp\"],\"YE\":[\"whatsapp\"],\"YT\":[\"whatsapp\"],\"ZA\":[\"whatsapp\"]}},\"2516824722\":{\"group\":\"6hU9eEG5SoU4gZ246VWXpT-6hzzOZa4CHVkiIGeQnPSiB\",\"id_type\":\"userID\",\"is_device_based\":false,\"name\":\"2516824722\",\"passed\":false,\"rule_id\":\"6hU9eEG5SoU4gZ246VWXpT-6hzzOZa4CHVkiIGeQnPSiB\",\"secondary_exposures\":[],\"value\":{\"sms\":[\"US\",\"CA\",\"JP\",\"KR\",\"FR\",\"TW\",\"TH\",\"FK\",\"NU\",\"TL\",\"VU\",\"SM\"],\"whatsapp\":[\"IN\",\"CO\",\"GB\",\"BR\",\"MX\",\"AR\",\"DE\",\"SE\",\"HU\",\"PH\",\"AU\",\"CZ\",\"IQ\",\"UA\",\"AZ\",\"MA\",\"PL\",\"RO\",\"BE\",\"PT\",\"GR\",\"IT\",\"AT\",\"CL\",\"CH\",\"ES\",\"NL\",\"TR\",\"AE\",\"SG\",\"IL\",\"ZA\",\"KE\",\"PM\",\"GL\",\"NF\",\"AS\",\"MS\",\"NR\",\"NZ\",\"VI\",\"GU\",\"MM\",\"BT\",\"CK\",\"MH\",\"AI\",\"FM\",\"LA\",\"EE\",\"TV\",\"VG\",\"PR\",\"PW\",\"WF\",\"KI\",\"NP\",\"LT\",\"GG\",\"LV\",\"BM\",\"PF\",\"JE\",\"KY\",\"IM\",\"PG\",\"SB\",\"IS\",\"GE\",\"BQ\",\"NC\",\"TC\",\"NI\",\"CW\",\"AW\",\"SV\",\"BS\",\"SX\",\"MD\",\"FJ\",\"TD\",\"WS\",\"ER\",\"TO\",\"SS\",\"FO\",\"ST\",\"NO\",\"VC\",\"SK\",\"KN\",\"FI\",\"DM\",\"LC\",\"TT\",\"AG\",\"GD\",\"SR\",\"BB\",\"GY\",\"BN\",\"GT\",\"SO\",\"NE\",\"RS\",\"CV\",\"DK\",\"BJ\",\"CI\",\"BZ\",\"BA\",\"GQ\",\"GA\",\"DJ\",\"MR\",\"RE\",\"GP\",\"MQ\",\"GF\",\"IE\",\"DO\",\"PA\",\"TN\",\"YT\",\"XK\",\"GM\",\"MK\",\"CG\",\"NA\",\"HR\",\"UY\",\"GI\",\"CR\",\"LR\",\"MW\",\"AD\",\"SC\",\"LS\",\"AL\",\"BH\",\"LI\",\"SZ\",\"LU\",\"CD\",\"OM\",\"MV\",\"BW\",\"CY\",\"MC\",\"KW\",\"PY\",\"MT\",\"TZ\",\"RW\",\"QA\",\"YE\",\"KZ\",\"TF\"]}},\"2605221437\":{\"group\":\"default\",\"id_type\":\"userID\",\"is_device_based\":false,\"name\":\"2605221437\",\"passed\":false,\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":{\"is_admin\":false,\"is_visible\":false}},\"283582977\":{\"group\":\"default\",\"id_type\":\"stableID\",\"is_device_based\":true,\"name\":\"283582977\",\"passed\":false,\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":{\"url\":\"https://help.openai.com/en/articles/9737562\"}},\"2911241762\":{\"group\":\"default\",\"id_type\":\"userID\",\"is_device_based\":false,\"name\":\"2911241762\",\"passed\":false,\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":{\"prompt_addition\":\"\"}},\"3145874458\":{\"group\":\"default\",\"id_type\":\"stableID\",\"is_device_based\":true,\"name\":\"3145874458\",\"passed\":false,\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":{\"millis\":3000}},\"326986246\":{\"group\":\"2ZfHR0RsE4PzfzdDrpsFJN:100.00:85-2ZfHQZcqbMG4W9FHQhx2qL\",\"id_type\":\"userID\",\"is_device_based\":false,\"name\":\"326986246\",\"passed\":true,\"rule_id\":\"2ZfHR0RsE4PzfzdDrpsFJN:100.00:85-2ZfHQZcqbMG4W9FHQhx2qL\",\"secondary_exposures\":[],\"value\":{\"cancel_review\":true,\"configure_draft_mcp\":true,\"create_app\":true,\"delete_app\":true,\"delete_draft\":true,\"deprecate_version\":true,\"finish_oauth\":true,\"get_app\":true,\"get_callback_id\":true,\"get_icon\":true,\"get_known_business\":true,\"get_screenshot\":true,\"get_version\":true,\"inspect_draft_mcp\":true,\"link_draft_mcp\":true,\"list_apps\":true,\"mcp_oauth_config\":true,\"publish_version\":true,\"resume_rejected_draft\":true,\"submit_draft\":true,\"unpublish_version\":true,\"update_app\":true,\"upload_icon\":true,\"upload_screenshot\":true,\"upsert_draft\":true,\"verify_domain\":true}},\"3371290211\":{\"group\":\"2BeZWh479U3QKYVz9MWamg:100.00:2-2BeZWfp4HBUmrznDyF0x3e\",\"id_type\":\"stableID\",\"is_device_based\":true,\"name\":\"3371290211\",\"passed\":true,\"rule_id\":\"2BeZWh479U3QKYVz9MWamg:100.00:2-2BeZWfp4HBUmrznDyF0x3e\",\"secondary_exposures\":[],\"value\":{\"steps\":[\"password_verification\",\"user_registration\",\"email_verification\"]}},\"3685705952\":{\"group\":\"2iM40zAnB3wf9IPQaVNA59-2iM40xVl8LmKQjhUzNRWM7\",\"id_type\":\"userID\",\"is_device_based\":false,\"name\":\"3685705952\",\"passed\":false,\"rule_id\":\"2iM40zAnB3wf9IPQaVNA59-2iM40xVl8LmKQjhUzNRWM7\",\"secondary_exposures\":[],\"value\":{\"sms\":[\"US\",\"CA\",\"JP\",\"KR\",\"FR\",\"TW\",\"TH\",\"FK\",\"NU\",\"TL\",\"VU\",\"SM\"],\"whatsapp\":[\"IN\",\"CO\",\"GB\",\"BR\",\"MX\",\"AR\",\"DE\",\"SE\",\"HU\",\"PH\",\"AU\",\"CZ\",\"IQ\",\"UA\",\"AZ\",\"MA\",\"PL\",\"RO\",\"BE\",\"PT\",\"GR\",\"IT\",\"AT\",\"CL\",\"CH\",\"ES\",\"NL\",\"TR\",\"AE\",\"SG\",\"IL\",\"ZA\",\"KE\",\"PM\",\"GL\",\"NF\",\"AS\",\"MS\",\"NR\",\"NZ\",\"VI\",\"GU\",\"MM\",\"BT\",\"CK\",\"MH\",\"AI\",\"FM\",\"LA\",\"EE\",\"TV\",\"VG\",\"PR\",\"PW\",\"WF\",\"KI\",\"NP\",\"LT\",\"GG\",\"LV\",\"BM\",\"PF\",\"JE\",\"KY\",\"IM\",\"PG\",\"SB\",\"IS\",\"GE\",\"BQ\",\"NC\",\"TC\",\"NI\",\"CW\",\"AW\",\"SV\",\"BS\",\"SX\",\"MD\",\"FJ\",\"TD\",\"WS\",\"ER\",\"TO\",\"SS\",\"FO\",\"ST\",\"NO\",\"VC\",\"SK\",\"KN\",\"FI\",\"DM\",\"LC\",\"TT\",\"AG\",\"GD\",\"SR\",\"BB\",\"GY\",\"BN\",\"GT\",\"SO\",\"NE\",\"RS\",\"CV\",\"DK\",\"BJ\",\"CI\",\"BZ\",\"BA\",\"GQ\",\"GA\",\"DJ\",\"MR\",\"RE\",\"GP\",\"MQ\",\"GF\",\"IE\",\"DO\",\"PA\",\"TN\",\"YT\",\"XK\",\"GM\",\"MK\",\"CG\",\"NA\",\"HR\",\"UY\",\"GI\",\"CR\",\"LR\",\"MW\",\"AD\",\"SC\",\"LS\",\"AL\",\"BH\",\"LI\",\"SZ\",\"LU\",\"CD\",\"OM\",\"MV\",\"BW\",\"CY\",\"MC\",\"KW\",\"PY\",\"MT\",\"TZ\",\"RW\",\"QA\"]}},\"3866584409\":{\"group\":\"default\",\"id_type\":\"userID\",\"is_device_based\":false,\"name\":\"3866584409\",\"passed\":false,\"rule_id\":\"default\",\"secondary_exposures\":[{\"gate\":\"4092543409\",\"gateValue\":\"false\",\"ruleID\":\"default\"},{\"gate\":\"295757309\",\"gateValue\":\"false\",\"ruleID\":\"6CYqzLNR69kOtn13xAfiry\"}],\"value\":{\"enabled\":true,\"kind\":\"social\",\"loginStrategy\":\"new_user\",\"name\":\"google\",\"tempDisabled\":false}},\"424309338\":{\"group\":\"default\",\"id_type\":\"userID\",\"is_device_based\":false,\"name\":\"424309338\",\"passed\":false,\"rule_id\":\"default\",\"secondary_exposures\":[{\"gate\":\"1593327882\",\"gateValue\":\"false\",\"ruleID\":\"76qOTrR42iVFDMFqFVMAUt\"}],\"value\":{\"enabled\":false,\"kind\":\"username\",\"loginStrategy\":\"new_user\",\"name\":\"phone_number\",\"tempDisabled\":false}},\"489084288\":{\"group\":\"default\",\"id_type\":\"stableID\",\"is_device_based\":true,\"name\":\"489084288\",\"passed\":false,\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":{\"options\":[\"google\",\"apple\",\"microsoft\",\"email\",\"phone_number\"]}},\"730493191\":{\"group\":\"default\",\"id_type\":\"userID\",\"is_device_based\":false,\"name\":\"730493191\",\"passed\":false,\"rule_id\":\"default\",\"secondary_exposures\":[{\"gate\":\"1584773534\",\"gateValue\":\"false\",\"ruleID\":\"0EJsCp3GoICPEDkX4u1bn\"}],\"value\":{\"enabled\":true,\"kind\":\"social\",\"loginStrategy\":\"existing_user\",\"name\":\"apple\",\"tempDisabled\":false}},\"734083401\":{\"group\":\"default\",\"id_type\":\"userID\",\"is_device_based\":false,\"name\":\"734083401\",\"passed\":false,\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":{\"enabled\":true,\"kind\":\"username\",\"loginStrategy\":\"existing_user\",\"name\":\"email\",\"tempDisabled\":false}},\"96139407\":{\"group\":\"default\",\"id_type\":\"stableID\",\"is_device_based\":true,\"name\":\"96139407\",\"passed\":false,\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":{}}},\"evaluated_keys\":{\"AuthSessionLoggingId\":\"server_27c39350-2b7a-40b6-894c-34aab5304aae\",\"DeviceId\":\"166c9272-2998-4564-8d04-6b03daf63c95\",\"WebAnonymousCookieID\":\"166c9272-2998-4564-8d04-6b03daf63c95\",\"stableID\":\"166c9272-2998-4564-8d04-6b03daf63c95\"},\"feature_gates\":{\"1007700932\":{\"id_type\":\"workspace_id\",\"name\":\"1007700932\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"1079309075\":{\"id_type\":\"stableID\",\"name\":\"1079309075\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"1140602061\":{\"id_type\":\"stableID\",\"name\":\"1140602061\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"1216135095\":{\"id_type\":\"userID\",\"name\":\"1216135095\",\"rule_id\":\"55XT4x80vLNTFoAYvfmCLT:100.00:4\",\"secondary_exposures\":[],\"value\":true},\"1284423339\":{\"id_type\":\"stableID\",\"name\":\"1284423339\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"1355972088\":{\"id_type\":\"workspace_id\",\"name\":\"1355972088\",\"rule_id\":\"2fNlChnSkZtK59pfA7tqS1\",\"secondary_exposures\":[{\"gate\":\"3989934672\",\"gateValue\":\"true\",\"ruleID\":\"9rwjPlONFbsqgo9kdWD6c:100.00:3\"}],\"value\":true},\"1424158285\":{\"id_type\":\"stableID\",\"name\":\"1424158285\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"1475533758\":{\"id_type\":\"userID\",\"name\":\"1475533758\",\"rule_id\":\"default\",\"secondary_exposures\":[{\"gate\":\"949606265\",\"gateValue\":\"false\",\"ruleID\":\"2lpDcuUELYXUMUbCWLWWvc\"}],\"value\":false},\"1554172046\":{\"id_type\":\"userID\",\"name\":\"1554172046\",\"rule_id\":\"4LWfscQsO8nNuSUxG2vuFr\",\"secondary_exposures\":[],\"value\":true},\"1584773534\":{\"id_type\":\"stableID\",\"name\":\"1584773534\",\"rule_id\":\"0EJsCp3GoICPEDkX4u1bn\",\"secondary_exposures\":[],\"value\":false},\"1593327882\":{\"id_type\":\"stableID\",\"name\":\"1593327882\",\"rule_id\":\"76qOTrR42iVFDMFqFVMAUt\",\"secondary_exposures\":[],\"value\":false},\"1643979050\":{\"id_type\":\"stableID\",\"name\":\"1643979050\",\"rule_id\":\"1GvwzO8FNKJBdFPRYjmPkN:100.00:11\",\"secondary_exposures\":[],\"value\":true},\"1645544703\":{\"id_type\":\"stableID\",\"name\":\"1645544703\",\"rule_id\":\"1o9V1Tu9jUpBscN072Nl99:0.00:8\",\"secondary_exposures\":[],\"value\":false},\"1680831978\":{\"id_type\":\"stableID\",\"name\":\"1680831978\",\"rule_id\":\"3n8UHTH8r35V6lqu7prZFa:0.00:3\",\"secondary_exposures\":[],\"value\":false},\"1707312034\":{\"id_type\":\"stableID\",\"name\":\"1707312034\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"1793816739\":{\"id_type\":\"userID\",\"name\":\"1793816739\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"2036808540\":{\"id_type\":\"stableID\",\"name\":\"2036808540\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"2072714933\":{\"id_type\":\"userID\",\"name\":\"2072714933\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"2080079262\":{\"id_type\":\"stableID\",\"name\":\"2080079262\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"2114808333\":{\"id_type\":\"userID\",\"name\":\"2114808333\",\"rule_id\":\"default\",\"secondary_exposures\":[{\"gate\":\"1424158285\",\"gateValue\":\"false\",\"ruleID\":\"default\"}],\"value\":false},\"2121403257\":{\"id_type\":\"workspace_id\",\"name\":\"2121403257\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"2230122680\":{\"id_type\":\"stableID\",\"name\":\"2230122680\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"2238884165\":{\"id_type\":\"userID\",\"name\":\"2238884165\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"2291893020\":{\"id_type\":\"stableID\",\"name\":\"2291893020\",\"rule_id\":\"3f01dLWqO4W6g7Di4B3RpH\",\"secondary_exposures\":[],\"value\":false},\"2327038700\":{\"id_type\":\"stableID\",\"name\":\"2327038700\",\"rule_id\":\"75W46bJXG52ig9Nd1kr6hE\",\"secondary_exposures\":[],\"value\":true},\"2369709783\":{\"id_type\":\"userID\",\"name\":\"2369709783\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"2470502841\":{\"id_type\":\"userID\",\"name\":\"2470502841\",\"rule_id\":\"609ngX4Ku7YY28RcppVYq8\",\"secondary_exposures\":[],\"value\":true},\"2501517780\":{\"id_type\":\"stableID\",\"name\":\"2501517780\",\"rule_id\":\"4IX1c4x0YAXSv9dLf6Kyer:100.00:3\",\"secondary_exposures\":[],\"value\":true},\"2508433885\":{\"id_type\":\"userID\",\"name\":\"2508433885\",\"rule_id\":\"3OiETe8Uvt1KBlFfd1RhM5:100.00:5\",\"secondary_exposures\":[],\"value\":true},\"2607061589\":{\"id_type\":\"userID\",\"name\":\"2607061589\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"2656205945\":{\"id_type\":\"userID\",\"name\":\"2656205945\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"2689066271\":{\"id_type\":\"userID\",\"name\":\"2689066271\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"2833768768\":{\"id_type\":\"stableID\",\"name\":\"2833768768\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"2865007894\":{\"id_type\":\"userID\",\"name\":\"2865007894\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"2913573978\":{\"id_type\":\"userID\",\"name\":\"2913573978\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"2920005700\":{\"id_type\":\"userID\",\"name\":\"2920005700\",\"rule_id\":\"6Eo4mwnWPxjEr7qZJCUkLO\",\"secondary_exposures\":[],\"value\":true},\"295757309\":{\"id_type\":\"stableID\",\"name\":\"295757309\",\"rule_id\":\"6CYqzLNR69kOtn13xAfiry\",\"secondary_exposures\":[],\"value\":false},\"2968710568\":{\"id_type\":\"userID\",\"name\":\"2968710568\",\"rule_id\":\"3waRyyIetXzdG1v2oZgX2R\",\"secondary_exposures\":[],\"value\":true},\"3096164155\":{\"id_type\":\"stableID\",\"name\":\"3096164155\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"3115159237\":{\"id_type\":\"stableID\",\"name\":\"3115159237\",\"rule_id\":\"5cfM5zt2FprcvwYcZ3jkRF\",\"secondary_exposures\":[],\"value\":true},\"3125419433\":{\"id_type\":\"stableID\",\"name\":\"3125419433\",\"rule_id\":\"2uxgUZkDOOU45WFuJGwfoe:100.00:2\",\"secondary_exposures\":[],\"value\":true},\"3159384781\":{\"id_type\":\"workspace_id\",\"name\":\"3159384781\",\"rule_id\":\"1pwfuS3hlK88YvR87XdIXL:100.00:3\",\"secondary_exposures\":[{\"gate\":\"3989934672\",\"gateValue\":\"true\",\"ruleID\":\"9rwjPlONFbsqgo9kdWD6c:100.00:3\"},{\"gate\":\"1355972088\",\"gateValue\":\"true\",\"ruleID\":\"2fNlChnSkZtK59pfA7tqS1\"}],\"value\":true},\"3279906112\":{\"id_type\":\"userID\",\"name\":\"3279906112\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"331196750\":{\"id_type\":\"stableID\",\"name\":\"331196750\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"3376158101\":{\"id_type\":\"userID\",\"name\":\"3376158101\",\"rule_id\":\"7fW0MKmrCVmZ8T9TwtRLmY\",\"secondary_exposures\":[],\"value\":true},\"3382332210\":{\"id_type\":\"workspace_id\",\"name\":\"3382332210\",\"rule_id\":\"10FSWfa2aCFVfM3xFSlwxh:100.00:4\",\"secondary_exposures\":[],\"value\":true},\"3496404037\":{\"id_type\":\"userID\",\"name\":\"3496404037\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"3605919906\":{\"id_type\":\"userID\",\"name\":\"3605919906\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"362740776\":{\"id_type\":\"stableID\",\"name\":\"362740776\",\"rule_id\":\"15WAYUZs3ufX1YHF7deJNm:100.00:4\",\"secondary_exposures\":[{\"gate\":\"1743497164\",\"gateValue\":\"false\",\"ruleID\":\"QbpAXUozPgnPCs4ejAusy:0.00:4\"}],\"value\":true},\"3728618460\":{\"id_type\":\"stableID\",\"name\":\"3728618460\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"3850038985\":{\"id_type\":\"stableID\",\"name\":\"3850038985\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"3905705655\":{\"id_type\":\"userID\",\"name\":\"3905705655\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"3913879995\":{\"id_type\":\"userID\",\"name\":\"3913879995\",\"rule_id\":\"5gmyt7IXzRrFp4e5VdG6C9\",\"secondary_exposures\":[],\"value\":true},\"3922080075\":{\"id_type\":\"userID\",\"name\":\"3922080075\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"4012051055\":{\"id_type\":\"stableID\",\"name\":\"4012051055\",\"rule_id\":\"5VSlsPH83H9AV6EfAmaM8h\",\"secondary_exposures\":[],\"value\":false},\"4037021579\":{\"id_type\":\"userID\",\"name\":\"4037021579\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"4047728368\":{\"id_type\":\"stableID\",\"name\":\"4047728368\",\"rule_id\":\"79RYEVPa7YZobGMW6Sd7VQ\",\"secondary_exposures\":[{\"gate\":\"868234208\",\"gateValue\":\"true\",\"ruleID\":\"7aK9YcHrIH30G0jPUlKhD0:5.00:1\"}],\"value\":false},\"4092543409\":{\"id_type\":\"stableID\",\"name\":\"4092543409\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"4100765009\":{\"id_type\":\"userID\",\"name\":\"4100765009\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"4233029563\":{\"id_type\":\"userID\",\"name\":\"4233029563\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"4244741861\":{\"id_type\":\"userID\",\"name\":\"4244741861\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"444232970\":{\"id_type\":\"stableID\",\"name\":\"444232970\",\"rule_id\":\"gbNhJYZt2LT0MMPpBwPnn\",\"secondary_exposures\":[],\"value\":false},\"569755863\":{\"id_type\":\"stableID\",\"name\":\"569755863\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"597299768\":{\"id_type\":\"userID\",\"name\":\"597299768\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"633220405\":{\"id_type\":\"stableID\",\"name\":\"633220405\",\"rule_id\":\"5chLkxvXvOXG6Vu7jtnbMi:100.00:8\",\"secondary_exposures\":[{\"gate\":\"1643979050\",\"gateValue\":\"true\",\"ruleID\":\"1GvwzO8FNKJBdFPRYjmPkN:100.00:11\"}],\"value\":true},\"676035580\":{\"id_type\":\"userID\",\"name\":\"676035580\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"694255885\":{\"id_type\":\"userID\",\"name\":\"694255885\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false},\"875954897\":{\"id_type\":\"stableID\",\"name\":\"875954897\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"value\":false}},\"has_updates\":true,\"hash_used\":\"djb2\",\"layer_configs\":{\"1704943789\":{\"explicit_parameters\":[],\"group\":\"default\",\"id_type\":\"userID\",\"is_device_based\":false,\"name\":\"1704943789\",\"rule_id\":\"default\",\"secondary_exposures\":[{\"gate\":\"4113286138\",\"gateValue\":\"false\",\"ruleID\":\"default\"},{\"gate\":\"1829150232\",\"gateValue\":\"false\",\"ruleID\":\"default\"},{\"gate\":\"3127130538\",\"gateValue\":\"false\",\"ruleID\":\"default\"}],\"undelegated_secondary_exposures\":[{\"gate\":\"4113286138\",\"gateValue\":\"false\",\"ruleID\":\"default\"},{\"gate\":\"1829150232\",\"gateValue\":\"false\",\"ruleID\":\"default\"},{\"gate\":\"3127130538\",\"gateValue\":\"false\",\"ruleID\":\"default\"}],\"value\":{\"connectors_button\":false,\"enableToggle\":false,\"group\":\"control\",\"join_teammates\":false,\"keywords-upsell\":false,\"links-upsell\":false,\"onboarding_state\":\"control\",\"post_connection_connector_button\":false,\"suggested_prompts\":false,\"toggleState\":\"off\"}},\"1803944755\":{\"allocated_experiment_name\":\"1771759151\",\"explicit_parameters\":[\"login_web_is_ssr_enabled\"],\"group\":\"7l9rdgHq6qTWTh17JLAU1X\",\"group_name\":\"Test\",\"id_type\":\"stableID\",\"is_device_based\":true,\"is_experiment_active\":true,\"is_user_in_experiment\":true,\"name\":\"1803944755\",\"rule_id\":\"7l9rdgHq6qTWTh17JLAU1X\",\"secondary_exposures\":[],\"undelegated_secondary_exposures\":[],\"value\":{\"bootstrap_statsig_on_server\":false,\"compute_statsig_bootstrap_on_server\":true,\"condense_authorize_redirects\":true,\"condense_consent_redirects\":false,\"condense_hydra_redirects\":true,\"consume_statsig_bootstrap_on_client\":true,\"enable_combined_login_or_signup_button\":false,\"enable_dynamic_redirect_for_existing_username_on_login_screen\":false,\"enable_dynamic_redirect_for_existing_username_on_signup_screen\":true,\"enable_link_wordmark_to_home_page\":false,\"enable_password_reset_leaked_credential_check\":false,\"enable_redirect_to_social_for_existing_email_on_login_screen\":true,\"enable_redirect_to_social_for_existing_email_on_signup_screen\":true,\"enable_signup_direct_username_verification\":false,\"enable_signup_leaked_credential_check\":false,\"enable_stateless_jwt\":false,\"enable_unified_login_or_signup_button\":false,\"enable_unified_login_or_signup_start_page_at_authapi\":false,\"enable_unified_login_or_signup_start_page_at_chatgpt_web\":true,\"enforce_hrd_for_explicit_password_connections\":true,\"expired_session_error_page_use_root_callback_path\":false,\"expired_session_error_page_variant\":\"show_just_chatgpt_login_button\",\"express_server_delivery_mechanism\":\"static\",\"in_login_web_branding_experiment\":false,\"is_email_bold\":false,\"is_login_modal_integration_enabled\":false,\"is_no_auth_login_modal_enabled\":false,\"log_back_variant\":\"control\",\"log_back_variation\":\"control\",\"login_or_signup_cta_copy\":\"LOGIN_OR_SIGNUP\",\"login_web_branding\":\"chatGPT\",\"login_web_is_ssr_enabled\":true,\"prefill_username_from_cookie\":false,\"send_statsig_bootstrap_to_client\":true,\"set_full_name_in_auth_session_cookie\":true,\"should_mobile_chat_header_use_login_or_sign_up_copy\":false,\"should_store_picture_in_auth_session_habitat\":false,\"show_subtitle_on_auth_page\":true,\"simplified_auth_options_web_variant\":\"username_and_socials\",\"stateless_jwt_variant\":\"skip\",\"store_picture_in_auth_session_cookie\":false,\"store_picture_in_auth_session_habitat\":false,\"use_authapi_password_connection_type\":true,\"use_code_in_title_for_email_otp_rollout\":false,\"use_code_in_title_for_mobile_passwordless_login_email_otp\":true,\"use_code_in_title_for_passwordless_login_email_otp\":true,\"use_dynamic_page_title\":true,\"use_generic_login_options_order\":true,\"use_mfaapi_for_email_otp_send_and_verify\":true,\"use_root_callback_path_for_chatgpt_web_error_retry_url\":true,\"use_separate_incorrect_password_error_message\":true}},\"183390215\":{\"explicit_parameters\":[],\"group\":\"default\",\"id_type\":\"stableID\",\"is_device_based\":true,\"name\":\"183390215\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"undelegated_secondary_exposures\":[],\"value\":{\"in_phone_signup_holdout\":false,\"in_phone_signup_holdout_from_login_web\":false,\"signup_allow_phone\":false,\"signup_allow_phone_from_login_web\":false}},\"2485454785\":{\"explicit_parameters\":[],\"group\":\"default\",\"id_type\":\"stableID\",\"is_device_based\":true,\"name\":\"2485454785\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"undelegated_secondary_exposures\":[],\"value\":{\"enable_chatgpt_email_body_branding_update\":false,\"enable_chatgpt_sender_name_update\":false,\"is_bold_email_verification_instructions\":false,\"otp_input_variant\":\"filled\",\"should_auto_submit\":true,\"use_6_input_boxes\":false,\"use_bold_email_mfa_challenge_instructions\":false,\"use_six_digit_content\":false}},\"2968602727\":{\"explicit_parameters\":[],\"group\":\"default\",\"id_type\":\"stableID\",\"is_device_based\":true,\"name\":\"2968602727\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"undelegated_secondary_exposures\":[],\"value\":{\"is_fallback_error_improvement_enabled\":true,\"is_font_improvements_enabled\":true,\"is_in_sso_up_holdout\":false,\"is_login_modal_integration_enabled\":false,\"is_no_auth_login_modal_enabled\":false,\"is_sso_below_username\":true,\"is_use_phone_a_link\":false}},\"3160704896\":{\"explicit_parameters\":[],\"group\":\"default\",\"id_type\":\"stableID\",\"is_device_based\":true,\"name\":\"3160704896\",\"rule_id\":\"default\",\"secondary_exposures\":[],\"undelegated_secondary_exposures\":[],\"value\":{\"loginVariant\":\"control\",\"signupVariant\":\"control\"}},\"3233347819\":{\"allocated_experiment_name\":\"1847048773\",\"explicit_parameters\":[\"hide_login_modal_subtitle_on_mweb\"],\"group\":\"4To47XWS1DSviENJPO8omK\",\"group_name\":\"Test\",\"id_type\":\"stableID\",\"is_device_based\":true,\"is_experiment_active\":true,\"is_user_in_experiment\":true,\"name\":\"3233347819\",\"rule_id\":\"4To47XWS1DSviENJPO8omK\",\"secondary_exposures\":[{\"gate\":\"3006285901\",\"gateValue\":\"false\",\"ruleID\":\"default\"},{\"gate\":\"3901589544\",\"gateValue\":\"false\",\"ruleID\":\"default\"}],\"undelegated_secondary_exposures\":[{\"gate\":\"3006285901\",\"gateValue\":\"false\",\"ruleID\":\"default\"},{\"gate\":\"3901589544\",\"gateValue\":\"false\",\"ruleID\":\"default\"}],\"value\":{\"add_section_splitter\":false,\"content-variation\":\"version-a\",\"create_image_free_copy\":false,\"disable_microsoft_access_option_in_login_page\":false,\"enable_chatgpt_email_body_branding_update\":false,\"enable_chatgpt_sender_name_update\":true,\"enable_clickable_wordmark\":true,\"enable_clickable_wordmark_mobile\":true,\"enable_email_one_pager_registration\":false,\"enable_login_modal_for_mobile\":true,\"google_one_tap_home_page_variation\":\"oneTapThenLoginModal\",\"has_content_improvements\":false,\"hide_login_modal_subtitle_on_mweb\":true,\"is_connection_type_logo_enabled\":false,\"is_esc_key_respected\":true,\"is_google_one_tap_auto_login_enabled\":false,\"is_google_one_tap_enabled\":false,\"is_google_one_tap_home_page_only\":false,\"is_google_one_tap_new_user_only\":true,\"is_google_one_tap_non_home_page_only\":true,\"is_home_page_excluded_from_google_one_tap\":false,\"is_login_modal_backdrop_clickable\":true,\"is_login_modal_integration_enabled\":true,\"is_login_modal_phase2_enabled\":true,\"is_login_modal_spinner_enabled\":true,\"is_login_page_title_and_description_enabled\":true,\"is_login_spinner_enabled\":true,\"is_mobile_input_focus_capture_handled\":false,\"is_no_auth_login_modal_enabled\":true,\"is_password_content_updated\":true,\"is_phone_country_prefill_enabled\":true,\"is_plain_login_page_enabled\":false,\"is_progress_bar_enabled\":false,\"is_revamped_login_page\":false,\"is_signup_text_updated\":false,\"is_social_btn_center_aligned\":false,\"is_use_phone_a_link\":false,\"log_back_variant\":\"sso_collapsed\",\"login_page_variation\":\"sso-collapsed\",\"login_variant\":\"compact\",\"mobile_log_back_variant\":\"sso_collapsed\",\"noop_param\":false,\"preserve_try_it_first_specific_conversation_return\":false,\"remove_email_from_input_field\":false,\"should_default_to_phone\":false,\"should_disable_google_one_tap_on_mobile_web\":false,\"should_hide_microsoft_sso\":true,\"should_ms_btn_be_moved\":true,\"should_offer_browser_handoff_for_android_webview_social_login\":false,\"should_prioritize_username_for_android_webview\":false,\"should_show_progress_bar_only_on_about_you_page\":false,\"should_suppress_google_one_tap_when_mobile_cookie_banner_shown\":true,\"should_update_msft_label\":true,\"should_use_actionable_email_validation_copy\":false,\"should_use_login_method_continue_cta\":false,\"should_use_smaller_button\":false,\"use_six_digit_content\":false,\"uses_auth_btn_left_alignment_fix\":true}},\"3283840244\":{\"allocated_experiment_name\":\"2792284722\",\"explicit_parameters\":[\"should_show_account_creation_wait_ui\"],\"group\":\"46ZwNNE8D2LUtq3mh3Z9RV\",\"group_name\":\"Test\",\"id_type\":\"stableID\",\"is_device_based\":true,\"is_experiment_active\":true,\"is_user_in_experiment\":true,\"name\":\"3283840244\",\"rule_id\":\"46ZwNNE8D2LUtq3mh3Z9RV\",\"secondary_exposures\":[{\"gate\":\"3006285901\",\"gateValue\":\"false\",\"ruleID\":\"default\"},{\"gate\":\"3901589544\",\"gateValue\":\"false\",\"ruleID\":\"default\"}],\"undelegated_secondary_exposures\":[{\"gate\":\"3006285901\",\"gateValue\":\"false\",\"ruleID\":\"default\"},{\"gate\":\"3901589544\",\"gateValue\":\"false\",\"ruleID\":\"default\"}],\"value\":{\"add_section_splitter\":false,\"enable_email_one_pager_registration\":false,\"is_age_fallback_enabled\":true,\"is_dark_mode_enabled\":true,\"is_farsi_locale_enabled\":false,\"is_gmail_up_signup_oauth_redirect_enabled\":false,\"is_reduced_motion_fix_enabled\":true,\"is_statsig_flushing_enabled\":false,\"is_token_revoked_handled\":true,\"remove_email_from_input_field\":false,\"should_default_birthday_to_today\":true,\"should_hide_age_fallback_confirm_dialog\":true,\"should_hide_age_fallback_use_dob_link\":true,\"should_show_account_creation_wait_ui\":true,\"should_show_warnIng_alert_on_close\":false,\"should_update_edit_button_color\":false,\"should_update_input_field_placeholder_color\":false,\"should_use_age_fallback_default_experience\":true,\"should_use_birthday_dropdowns\":false,\"should_use_client_side_minimum_age_check\":true,\"should_use_finish_creating_account_cta\":true,\"should_use_last_step_confirm_age_title\":false,\"show_contact_verification_password_cta_above_social\":false,\"show_contact_verification_social_ctas_account_creation_otp\":false,\"show_contact_verification_social_ctas_passwordless\":false,\"use_six_digit_content\":false,\"use_zod_email_regex\":false}},\"785639745\":{\"allocated_experiment_name\":\"138295337\",\"explicit_parameters\":[\"enable_default_to_passwordless_signup_android\"],\"group\":\"targetingGate\",\"id_type\":\"stableID\",\"is_device_based\":true,\"is_experiment_active\":true,\"is_user_in_experiment\":false,\"name\":\"785639745\",\"rule_id\":\"targetingGate\",\"secondary_exposures\":[{\"gate\":\"3006285901\",\"gateValue\":\"false\",\"ruleID\":\"default\"},{\"gate\":\"3901589544\",\"gateValue\":\"false\",\"ruleID\":\"default\"},{\"gate\":\"3032899854\",\"gateValue\":\"false\",\"ruleID\":\"default\"}],\"undelegated_secondary_exposures\":[{\"gate\":\"3006285901\",\"gateValue\":\"false\",\"ruleID\":\"default\"},{\"gate\":\"3901589544\",\"gateValue\":\"false\",\"ruleID\":\"default\"}],\"value\":{\"add_section_splitter\":false,\"auto_passwordless_after_failed_attempts_threshold\":0,\"auto_passwordless_after_failed_attempts_variant\":\"default\",\"default_login_method_experiment_variant\":\"control\",\"default_to_passwordless_otp_login\":true,\"default_to_passwordless_otp_login_android\":true,\"default_to_passwordless_otp_login_ios\":true,\"enable_default_to_passwordless_signup\":true,\"enable_default_to_passwordless_signup_android\":true,\"enable_default_to_passwordless_signup_ios\":false,\"enable_email_one_pager_registration\":false,\"login_password_variant\":\"passwordless_primary\",\"otpFallbackThreshold\":2,\"remove_email_from_input_field\":false,\"reset_password_variant\":\"no_passwordless\",\"shouldFallbackToOTP\":false,\"show_apple_on_login_password\":false,\"show_contact_verification_password_cta\":true,\"show_contact_verification_password_cta_above_social\":false,\"show_contact_verification_social_ctas_account_creation_otp\":true,\"show_contact_verification_social_ctas_passwordless\":false,\"show_google_on_login_password\":false,\"show_microsoft_on_login_password\":false,\"signup_password_variant\":\"under_or\"}}},\"param_stores\":{},\"recording_blocked\":false,\"sdkInfo\":{\"sdkType\":\"statsig-server-core-node\",\"sdkVersion\":\"0.6.1\"},\"sdkParams\":{},\"session_recording_rate\":1.0,\"time\":1779809170707,\"user\":{\"appVersion\":\"17b95302edd75da206081e1a93807f2b76270c64\",\"country\":\"US\",\"custom\":{\"AuthSessionLoggingId\":\"server_27c39350-2b7a-40b6-894c-34aab5304aae\",\"app_name_enum\":\"oaicli\",\"client_id\":\"app_EMoamEEZ73f0CkXaXp7hrann\",\"client_type\":\"web\",\"originator\":\"codex_vscode\",\"route\":\"/add-phone\"},\"customIDs\":{\"AuthSessionLoggingId\":\"server_27c39350-2b7a-40b6-894c-34aab5304aae\",\"DeviceId\":\"166c9272-2998-4564-8d04-6b03daf63c95\",\"WebAnonymousCookieID\":\"166c9272-2998-4564-8d04-6b03daf63c95\",\"stableID\":\"166c9272-2998-4564-8d04-6b03daf63c95\"},\"ip\":\"148.170.86.55\",\"locale\":\"en-US\",\"statsigEnvironment\":{\"tier\":\"production\"},\"userAgent\":\"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36\"}}"
+                },
+                "immutableClientSessionMetadata": {
+                    "session_id": "authsess_o3wsG0HWcxt7ky3LpIZII9u7",
+                    "openai_client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
+                    "app_name_enum": "oaicli",
+                    "auth_session_logging_id": "server_27c39350-2b7a-40b6-894c-34aab5304aae",
+                    "originator": "codex_vscode"
+                }
+            }</script>
+        <script nonce="SHSjnnfKFLFSs8MwAI5P1Q==">
+            window.__reactRouterContext = {
+                "basename": "/",
+                "future": {
+                    "unstable_optimizeDeps": true,
+                    "unstable_subResourceIntegrity": false,
+                    "unstable_trailingSlashAwareDataRequests": false,
+                    "v8_middleware": false,
+                    "v8_splitRouteModules": false,
+                    "v8_viteEnvironmentApi": false
+                },
+                "routeDiscovery": {
+                    "mode": "initial"
+                },
+                "ssr": true,
+                "isSpaMode": false
+            };
+            window.__reactRouterContext.stream = new ReadableStream({
+                start(controller) {
+                    window.__reactRouterContext.streamController = controller;
+                }
+            }).pipeThrough(new TextEncoderStream());
+        </script>
+        <script nonce="SHSjnnfKFLFSs8MwAI5P1Q==" type="module" async="">
+            import "https://auth-cdn.oaistatic.com/assets/manifest-226dd3c2.js";
+            import*as route0 from "https://auth-cdn.oaistatic.com/assets/root-CmwRoVhK.js";
+            import*as route1 from "https://auth-cdn.oaistatic.com/assets/layout-DP0G35pQ.js";
+            import*as route2 from "https://auth-cdn.oaistatic.com/assets/route-MI9bbJkP.js";
+
+            window.__reactRouterRouteModules = {
+                "root": route0,
+                "routes/layouts/client-auth-session-layout/layout": route1,
+                "ADD_PHONE": route2
+            };
+
+            import("https://auth-cdn.oaistatic.com/assets/entry.client-BfUPXQtc.js");
+        </script>
+        <!--$?-->
+        <template id="B:0"></template>
+        <!--/$-->
+        <script nonce="SHSjnnfKFLFSs8MwAI5P1Q==" id="_R_">
+            requestAnimationFrame(function() {
+                $RT = performance.now()
+            });
+        </script>
+        <div hidden id="S:0">
+            <script nonce="SHSjnnfKFLFSs8MwAI5P1Q==">
+                window.__reactRouterContext.streamController.enqueue("[{\"_1\":2,\"_51\":-5,\"_52\":-5},\"loaderData\",{\"_3\":4},\"routes/layouts/client-auth-session-layout/layout\",{\"_5\":6,\"_45\":46},\"session\",{\"_7\":8,\"_9\":10,\"_11\":12,\"_13\":14,\"_15\":16,\"_17\":18,\"_19\":20,\"_21\":22,\"_23\":24,\"_25\":26,\"_27\":28,\"_29\":30,\"_31\":30,\"_32\":33,\"_34\":35,\"_36\":37,\"_43\":44},\"session_id\",\"authsess_o3wsG0HWcxt7ky3LpIZII9u7\",\"auth_session_logging_id\",\"server_27c39350-2b7a-40b6-894c-34aab5304aae\",\"email\",\"kites52.ringers+goj@icloud.com\",\"email_verified\",true,\"phone_number\",\"+48723978034\",\"phone_verification_channel\",\"whatsapp\",\"name\",\"Alex Walker\",\"openai_client_id\",\"app_EMoamEEZ73f0CkXaXp7hrann\",\"originator\",\"codex_vscode\",\"originator_display_name\",\"Codex\",\"app_name_enum\",\"oaicli\",\"promo\",\"\",\"signup_source\",\"country_code_hint\",\"US\",\"original_screen_hint\",\"login\",\"requested_oauth_scopes\",[38,39,11,40,41,42],\"api.connectors.invoke\",\"api.connectors.read\",\"offline_access\",\"openid\",\"profile\",\"is_missing_session\",false,\"seedCacheEntry\",{\"_47\":48,\"_49\":8,\"_5\":50},\"checksum\",\"f7a399bd5a\",\"sessionId\",{\"_7\":8,\"_9\":10,\"_11\":12,\"_13\":14,\"_15\":16,\"_17\":18,\"_19\":20,\"_21\":22,\"_23\":24,\"_25\":26,\"_27\":28,\"_29\":30,\"_31\":30,\"_32\":33,\"_34\":35,\"_36\":37},\"actionData\",\"errors\"]\n");
+            </script>
+            <!--$?-->
+            <template id="B:1"></template>
+            <!--/$-->
+        </div>
+        <script nonce="SHSjnnfKFLFSs8MwAI5P1Q==">
+            $RB = [];
+            $RV = function(a) {
+                $RT = performance.now();
+                for (var b = 0; b < a.length; b += 2) {
+                    var c = a[b]
+                      , e = a[b + 1];
+                    null !== e.parentNode && e.parentNode.removeChild(e);
+                    var f = c.parentNode;
+                    if (f) {
+                        var g = c.previousSibling
+                          , h = 0;
+                        do {
+                            if (c && 8 === c.nodeType) {
+                                var d = c.data;
+                                if ("/$" === d || "/&" === d)
+                                    if (0 === h)
+                                        break;
+                                    else
+                                        h--;
+                                else
+                                    "$" !== d && "$?" !== d && "$~" !== d && "$!" !== d && "&" !== d || h++
+                            }
+                            d = c.nextSibling;
+                            f.removeChild(c);
+                            c = d
+                        } while (c);
+                        for (; e.firstChild; )
+                            f.insertBefore(e.firstChild, c);
+                        g.data = "$";
+                        g._reactRetry && requestAnimationFrame(g._reactRetry)
+                    }
+                }
+                a.length = 0
+            }
+            ;
+            $RC = function(a, b) {
+                if (b = document.getElementById(b))
+                    (a = document.getElementById(a)) ? (a.previousSibling.data = "$~",
+                    $RB.push(a, b),
+                    2 === $RB.length && ("number" !== typeof $RT ? requestAnimationFrame($RV.bind(null, $RB)) : (a = performance.now(),
+                    setTimeout($RV.bind(null, $RB), 2300 > a && 2E3 < a ? 2300 - a : $RT + 300 - a)))) : b.parentNode.removeChild(b)
+            }
+            ;
+            $RC("B:0", "S:0")
+        </script>
+        <div hidden id="S:1">
+            <script nonce="SHSjnnfKFLFSs8MwAI5P1Q==">
+                window.__reactRouterContext.streamController.close();
+            </script>
+        </div>
+        <script nonce="SHSjnnfKFLFSs8MwAI5P1Q==">
+            $RC("B:1", "S:1")
+        </script>
+        <script nonce="SHSjnnfKFLFSs8MwAI5P1Q==">
+            (function() {
+                function c() {
+                    var b = a.contentDocument || a.contentWindow.document;
+                    if (b) {
+                        var d = b.createElement('script');
+                        d.nonce = 'SHSjnnfKFLFSs8MwAI5P1Q==';
+                        d.innerHTML = "window.__CF$cv$params={r:'a01de3e9cb0da8a6',t:'MTc3OTgxMDE1MQ=='};var a=document.createElement('script');a.nonce='SHSjnnfKFLFSs8MwAI5P1Q==';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";
+                        b.getElementsByTagName('head')[0].appendChild(d)
+                    }
+                }
+                if (document.body) {
+                    var a = document.createElement('iframe');
+                    a.height = 1;
+                    a.width = 1;
+                    a.style.position = 'absolute';
+                    a.style.top = 0;
+                    a.style.left = 0;
+                    a.style.border = 'none';
+                    a.style.visibility = 'hidden';
+                    document.body.appendChild(a);
+                    if ('loading' !== document.readyState)
+                        c();
+                    else if (window.addEventListener)
+                        document.addEventListener('DOMContentLoaded', c);
+                    else {
+                        var e = document.onreadystatechange || function() {}
+                        ;
+                        document.onreadystatechange = function(b) {
+                            e(b);
+                            'loading' !== document.readyState && (document.onreadystatechange = e,
+                            c())
+                        }
+                    }
+                }
+            }
+            )();
+        </script>
+    </body>
+</html>
