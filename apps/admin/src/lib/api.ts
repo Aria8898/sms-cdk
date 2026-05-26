@@ -30,6 +30,7 @@ export interface Provider {
 export interface Service {
   id: string; providerId: string; providerName: string; name: string; shortName: string
   externalServiceId: string; successRateThreshold: number; maxPrice: number
+  blockedCountries: string[]
   createdAt: string; cdkCount?: number
 }
 export interface Cdk {
@@ -67,7 +68,7 @@ export const servicesApi = {
   list: () => request<Service[]>('/api/services'),
   create: (data: Omit<Service, 'id' | 'providerName' | 'createdAt' | 'cdkCount'>) =>
     request<Service>('/api/services', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: string, data: { successRateThreshold?: number; maxPrice?: number }) =>
+  update: (id: string, data: { successRateThreshold?: number; maxPrice?: number; blockedCountries?: string[] }) =>
     request<Service>(`/api/services/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) =>
     request<{ success: boolean }>(`/api/services/${id}`, { method: 'DELETE' }),
@@ -82,6 +83,7 @@ export interface PoolCountry {
   lowPrice: number
   successRate: number
   stock: number
+  blocked: boolean
   qualifies: boolean
   rank: number | null
 }
@@ -92,10 +94,12 @@ export interface PoolStatusResult {
     providerName: string
     successRateThreshold: number
     maxPrice: number
+    blockedCountries: string[]
   }
   summary: {
     total: number
     qualified: number
+    blocked: number
     topPicks: string[]
   }
   countries: PoolCountry[]

@@ -27,6 +27,7 @@ app.get('/', async (c) => {
       externalServiceId: services.externalServiceId,
       successRateThreshold: services.successRateThreshold,
       maxPrice: services.maxPrice,
+      blockedCountries: services.blockedCountries,
       providerSlug: providers.slug,
       providerName: providers.name,
     })
@@ -38,17 +39,25 @@ app.get('/', async (c) => {
     return c.json({ error: 'Service 不存在' }, 404)
   }
 
+  const blockedCountries: string[] = JSON.parse(row.blockedCountries ?? '[]')
+  const blockedSet = new Set(blockedCountries.map(s => s.toUpperCase()))
+
   // 通过 adapter 获取号池原始数据
   const provider = getProvider(row.providerSlug!, c.env.SMSPOOL_API_KEY)
   const rawCountries = await provider.getPoolStatus(row.externalServiceId)
 
-  // 应用号选策略，打上筛选标签和排名
-  type EnrichedCountry = (typeof rawCountries)[number] & { qualifies: boolean; rank: number | null }
-  const countries: EnrichedCountry[] = rawCountries.map(c => ({
-    ...c,
-    qualifies: c.successRate >= row.successRateThreshold && c.lowPrice <= row.maxPrice,
-    rank: null,
-  }))
+  // 应用号选策略，打上屏蔽标签、筛选标签和排名
+  type EnrichedCountry = (typeof rawCountries)[number] & {
+    blocked: boolean
+    qualifies: boolean
+    rank: number | null
+  }
+
+  const countries: EnrichedCountry[] = rawCountries.map(c => {
+    const blocked = blockedSet.size > 0 && blockedSet.has(c.shortName.toUpperCase())
+    const qualifies = !blocked && c.successRate >= row.successRateThreshold && c.lowPrice <= row.maxPrice
+    return { ...c, blocked, qualifies, rank: null }
+  })
 
   // 对符合策略的国家按 lowPrice 升序排名
   let rank = 1
@@ -58,6 +67,7 @@ app.get('/', async (c) => {
     .forEach(c => { c.rank = rank++ })
 
   const qualified = countries.filter(c => c.qualifies)
+  const blockedList = countries.filter(c => c.blocked)
   const topPicks = qualified
     .sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999))
     .slice(0, 3)
@@ -70,10 +80,12 @@ app.get('/', async (c) => {
       providerName: row.providerName,
       successRateThreshold: row.successRateThreshold,
       maxPrice: row.maxPrice,
+      blockedCountries,
     },
     summary: {
       total: countries.length,
       qualified: qualified.length,
+      blocked: blockedList.length,
       topPicks,
     },
     countries,

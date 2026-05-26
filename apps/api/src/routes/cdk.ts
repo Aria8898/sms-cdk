@@ -68,6 +68,7 @@ app.post('/order', async (c) => {
       externalServiceId: services.externalServiceId,
       maxPrice: services.maxPrice,
       successRateThreshold: services.successRateThreshold,
+      blockedCountries: services.blockedCountries,
       providerSlug: providers.slug,
       providerName: providers.name,
     })
@@ -116,6 +117,7 @@ app.post('/order', async (c) => {
     const result = await adapter.orderNumber(row.externalServiceId!, {
       maxPrice: row.maxPrice!,
       successRateThreshold: row.successRateThreshold!,
+      blockedCountries: JSON.parse(row.blockedCountries ?? '[]') as string[],
     })
 
     const expiresAt = new Date(Date.now() + result.expiresIn * 1000).toISOString()

@@ -20,6 +20,7 @@ app.get('/', async (c) => {
       externalServiceId: services.externalServiceId,
       successRateThreshold: services.successRateThreshold,
       maxPrice: services.maxPrice,
+      blockedCountries: services.blockedCountries,
       createdAt: services.createdAt,
       providerName: providers.name,
       cdkCount: sql<number>`count(${cdks.id})`.as('cdk_count'),
@@ -29,7 +30,10 @@ app.get('/', async (c) => {
     .leftJoin(cdks, eq(cdks.serviceId, services.id))
     .groupBy(services.id)
 
-  return c.json(rows)
+  return c.json(rows.map(row => ({
+    ...row,
+    blockedCountries: JSON.parse(row.blockedCountries ?? '[]') as string[],
+  })))
 })
 
 app.post('/', async (c) => {
@@ -40,6 +44,7 @@ app.post('/', async (c) => {
     externalServiceId: string
     successRateThreshold?: number
     maxPrice?: number
+    blockedCountries?: string[]
   }>()
 
   const db = getDb(c.env.DB)
@@ -54,12 +59,16 @@ app.post('/', async (c) => {
     externalServiceId: body.externalServiceId,
     successRateThreshold: body.successRateThreshold ?? 70,
     maxPrice: body.maxPrice ?? 0.5,
+    blockedCountries: JSON.stringify(body.blockedCountries ?? []),
     createdAt,
   })
 
   const [created] = await db.select().from(services).where(eq(services.id, id))
 
-  return c.json(created, 201)
+  return c.json({
+    ...created,
+    blockedCountries: JSON.parse(created.blockedCountries ?? '[]') as string[],
+  }, 201)
 })
 
 app.put('/:id', async (c) => {
@@ -67,19 +76,24 @@ app.put('/:id', async (c) => {
   const body = await c.req.json<{
     successRateThreshold?: number
     maxPrice?: number
+    blockedCountries?: string[]
   }>()
 
   const db = getDb(c.env.DB)
 
-  const updates: Partial<{ successRateThreshold: number; maxPrice: number }> = {}
+  const updates: Partial<{ successRateThreshold: number; maxPrice: number; blockedCountries: string }> = {}
   if (body.successRateThreshold !== undefined) updates.successRateThreshold = body.successRateThreshold
   if (body.maxPrice !== undefined) updates.maxPrice = body.maxPrice
+  if (body.blockedCountries !== undefined) updates.blockedCountries = JSON.stringify(body.blockedCountries)
 
   await db.update(services).set(updates).where(eq(services.id, id))
 
   const [updated] = await db.select().from(services).where(eq(services.id, id))
 
-  return c.json(updated)
+  return c.json({
+    ...updated,
+    blockedCountries: JSON.parse(updated.blockedCountries ?? '[]') as string[],
+  })
 })
 
 app.delete('/:id', async (c) => {

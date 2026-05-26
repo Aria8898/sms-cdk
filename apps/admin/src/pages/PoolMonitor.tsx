@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { providersApi, servicesApi, poolApi, type Provider, type Service, type PoolCountry, type PoolStatusResult } from '../lib/api'
 
-type TabValue = 'all' | 'qualified'
+type TabValue = 'all' | 'qualified' | 'blocked'
 
 export default function PoolMonitor() {
   const [providers, setProviders] = useState<Provider[]>([])
@@ -72,11 +72,16 @@ export default function PoolMonitor() {
   const displayCountries: PoolCountry[] = result
     ? tab === 'qualified'
       ? result.countries.filter(c => c.qualifies).sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999))
+      : tab === 'blocked'
+      ? result.countries.filter(c => c.blocked).sort((a, b) => a.shortName.localeCompare(b.shortName))
       : [...result.countries].sort((a, b) => {
-          // 符合策略的在前，按 rank 排；不符合的在后，按成功率降序
+          // 排序：符合策略 → 不符合（按成功率） → 已屏蔽（按代码）
           if (a.qualifies && !b.qualifies) return -1
           if (!a.qualifies && b.qualifies) return 1
+          if (a.blocked && !b.blocked) return 1
+          if (!a.blocked && b.blocked) return -1
           if (a.qualifies && b.qualifies) return (a.rank ?? 999) - (b.rank ?? 999)
+          if (a.blocked && b.blocked) return a.shortName.localeCompare(b.shortName)
           return b.successRate - a.successRate
         })
     : []
@@ -136,7 +141,7 @@ export default function PoolMonitor() {
       {result && (
         <>
           {/* 摘要卡片 */}
-          <div className="grid grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-5 gap-4 mb-6">
             <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
               <div className="text-xs text-gray-500 mb-1">当前策略</div>
               <div className="text-sm font-medium text-gray-900">
@@ -158,6 +163,11 @@ export default function PoolMonitor() {
             </div>
 
             <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
+              <div className="text-xs text-gray-500 mb-1">已屏蔽</div>
+              <div className="text-2xl font-semibold text-orange-500">{result.summary.blocked}</div>
+            </div>
+
+            <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
               <div className="text-xs text-gray-500 mb-1">优选国家（前3）</div>
               <div className="flex gap-1 mt-1 flex-wrap">
                 {result.summary.topPicks.length > 0
@@ -174,7 +184,11 @@ export default function PoolMonitor() {
 
           {/* Tab 切换 */}
           <div className="flex gap-1 mb-4 bg-gray-100 rounded-lg p-1 w-fit">
-            {([['all', `全部 (${result.summary.total})`], ['qualified', `符合策略 (${result.summary.qualified})`]] as [TabValue, string][]).map(([value, label]) => (
+            {([
+              ['all', `全部 (${result.summary.total})`],
+              ['qualified', `符合策略 (${result.summary.qualified})`],
+              ['blocked', `已屏蔽 (${result.summary.blocked})`],
+            ] as [TabValue, string][]).map(([value, label]) => (
               <button
                 key={value}
                 onClick={() => setTab(value)}
@@ -206,16 +220,25 @@ export default function PoolMonitor() {
                 {displayCountries.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="px-5 py-12 text-center text-gray-400">
-                      {tab === 'qualified' ? '当前没有符合策略的国家' : '暂无数据'}
+                      {tab === 'qualified' ? '当前没有符合策略的国家' : tab === 'blocked' ? '当前没有屏蔽的国家' : '暂无数据'}
                     </td>
                   </tr>
                 ) : (
                   displayCountries.map(country => (
-                    <tr key={country.countryId} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                    <tr
+                      key={country.countryId}
+                      className={`border-b border-gray-100 transition-colors ${
+                        country.blocked ? 'bg-orange-50 hover:bg-orange-100' : 'hover:bg-gray-50'
+                      }`}
+                    >
                       <td className="px-5 py-3 font-medium text-gray-900">{country.name}</td>
                       <td className="px-5 py-3 font-mono text-gray-500">{country.shortName}</td>
                       <td className="px-5 py-3 text-right">
-                        <SuccessRateBar value={country.successRate} threshold={result.service.successRateThreshold} />
+                        <SuccessRateBar
+                          value={country.successRate}
+                          threshold={result.service.successRateThreshold}
+                          dimmed={country.blocked}
+                        />
                       </td>
                       <td className="px-5 py-3 text-right font-mono text-gray-700">
                         ${country.lowPrice.toFixed(2)}
@@ -225,6 +248,7 @@ export default function PoolMonitor() {
                       </td>
                       <td className="px-5 py-3">
                         <QualifyBadge
+                          blocked={country.blocked}
                           qualifies={country.qualifies}
                           rank={country.rank}
                           successRate={country.successRate}
@@ -251,10 +275,10 @@ export default function PoolMonitor() {
   )
 }
 
-function SuccessRateBar({ value, threshold }: { value: number; threshold: number }) {
+function SuccessRateBar({ value, threshold, dimmed }: { value: number; threshold: number; dimmed: boolean }) {
   const passes = value >= threshold
   return (
-    <div className="flex items-center justify-end gap-2">
+    <div className={`flex items-center justify-end gap-2 ${dimmed ? 'opacity-50' : ''}`}>
       <div className="w-20 bg-gray-100 rounded-full h-1.5">
         <div
           className={`h-1.5 rounded-full ${passes ? 'bg-green-500' : 'bg-red-400'}`}
@@ -275,8 +299,9 @@ function StockBadge({ stock }: { stock: number }) {
 }
 
 function QualifyBadge({
-  qualifies, rank, successRate, lowPrice, threshold, maxPrice
+  blocked, qualifies, rank, successRate, lowPrice, threshold, maxPrice
 }: {
+  blocked: boolean
   qualifies: boolean
   rank: number | null
   successRate: number
@@ -284,6 +309,14 @@ function QualifyBadge({
   threshold: number
   maxPrice: number
 }) {
+  if (blocked) {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 bg-orange-100 text-orange-700 rounded text-xs font-medium">
+        已屏蔽
+      </span>
+    )
+  }
+
   if (qualifies) {
     return (
       <div className="flex items-center gap-2">

@@ -60,14 +60,21 @@ export class SmsPoolAdapter implements SmsProvider {
       console.error(`[smspool] success_rate fetch error:`, err)
     }
 
-    // 过滤成功率达标 + 价格在预算内的国家，按 low_price 升序（优先最便宜）
+    // 屏蔽名单（shortName 大写比较）
+    const blockedSet = new Set((options.blockedCountries ?? []).map(s => s.toUpperCase()))
+    const isBlocked = (c: SuccessRateEntry) => blockedSet.size > 0 && blockedSet.has(c.short_name.toUpperCase())
+
+    // 过滤成功率达标 + 价格在预算内 + 不在屏蔽名单的国家，按 low_price 升序（优先最便宜）
     let qualified = candidates
-      .filter((c) => c.success_rate >= options.successRateThreshold && parseFloat(c.low_price) <= options.maxPrice)
+      .filter((c) => !isBlocked(c) && c.success_rate >= options.successRateThreshold && parseFloat(c.low_price) <= options.maxPrice)
       .sort((a, b) => parseFloat(a.low_price) - parseFloat(b.low_price))
 
-    // 若无符合条件的国家，取前 3 个作为 fallback
+    // 若无符合条件的国家，取成功率最高的前 3 个作为 fallback（仍排除屏蔽国家）
     if (qualified.length === 0) {
-      qualified = [...candidates].sort((a, b) => b.success_rate - a.success_rate).slice(0, 3)
+      qualified = [...candidates]
+        .filter((c) => !isBlocked(c))
+        .sort((a, b) => b.success_rate - a.success_rate)
+        .slice(0, 3)
     }
 
     // 最多尝试前 3 个候选国家

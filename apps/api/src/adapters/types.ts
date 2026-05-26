@@ -1,6 +1,7 @@
 export interface OrderOptions {
   maxPrice: number
   successRateThreshold: number
+  blockedCountries: string[]
 }
 
 export interface OrderResult {

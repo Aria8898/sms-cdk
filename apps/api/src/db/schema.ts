@@ -15,6 +15,7 @@ export const services = sqliteTable('services', {
   externalServiceId: text('external_service_id').notNull(),
   successRateThreshold: integer('success_rate_threshold').notNull().default(70),
   maxPrice: real('max_price').notNull().default(0.5),
+  blockedCountries: text('blocked_countries').notNull().default('[]'),
   createdAt: text('created_at').notNull(),
 })
 
