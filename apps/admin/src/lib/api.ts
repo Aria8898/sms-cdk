@@ -73,6 +73,39 @@ export const servicesApi = {
     request<{ success: boolean }>(`/api/services/${id}`, { method: 'DELETE' }),
 }
 
+// ---- Pool Monitor ----
+export interface PoolCountry {
+  countryId: number | string
+  name: string
+  shortName: string
+  price: number
+  lowPrice: number
+  successRate: number
+  stock: number
+  qualifies: boolean
+  rank: number | null
+}
+export interface PoolStatusResult {
+  service: {
+    id: string
+    name: string
+    providerName: string
+    successRateThreshold: number
+    maxPrice: number
+  }
+  summary: {
+    total: number
+    qualified: number
+    topPicks: string[]
+  }
+  countries: PoolCountry[]
+}
+
+export const poolApi = {
+  status: (serviceId: string) =>
+    request<PoolStatusResult>(`/api/pool-status?serviceId=${encodeURIComponent(serviceId)}`),
+}
+
 // ---- CDKs ----
 export const cdksApi = {
   list: (status?: string) =>

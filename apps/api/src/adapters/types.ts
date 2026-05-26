@@ -16,8 +16,19 @@ export interface PollResult {
   timeLeft?: number
 }
 
+export interface PoolCountryStatus {
+  countryId: number | string
+  name: string
+  shortName: string
+  price: number
+  lowPrice: number
+  successRate: number
+  stock: number
+}
+
 export interface SmsProvider {
   orderNumber(externalServiceId: string, options: OrderOptions): Promise<OrderResult>
   pollOrder(externalOrderId: string): Promise<PollResult>
   cancelOrder(externalOrderId: string): Promise<void>
+  getPoolStatus(externalServiceId: string): Promise<PoolCountryStatus[]>
 }

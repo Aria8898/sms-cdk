@@ -1,4 +1,4 @@
-import type { SmsProvider, OrderOptions, OrderResult, PollResult } from './types'
+import type { SmsProvider, OrderOptions, OrderResult, PollResult, PoolCountryStatus } from './types'
 
 const BASE_URL = 'https://api.smspool.net'
 
@@ -161,6 +161,29 @@ export class SmsPoolAdapter implements SmsProvider {
       return { status: 'cancelled', timeLeft }
     } catch (err) {
       throw new Error(err instanceof Error ? err.message : '查询订单状态失败')
+    }
+  }
+
+  async getPoolStatus(externalServiceId: string): Promise<PoolCountryStatus[]> {
+    const url = `${BASE_URL}/request/success_rate?service=${encodeURIComponent(externalServiceId)}`
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 8000)
+    try {
+      const res = await fetch(url, { signal: ctrl.signal })
+      if (!res.ok) throw new Error(`SMSPool API error: ${res.status}`)
+      const data = await res.json()
+      if (!Array.isArray(data)) return []
+      return (data as SuccessRateEntry[]).map(c => ({
+        countryId: c.country_id,
+        name: c.name,
+        shortName: c.short_name,
+        price: parseFloat(c.price),
+        lowPrice: parseFloat(c.low_price),
+        successRate: c.success_rate,
+        stock: c.stock,
+      }))
+    } finally {
+      clearTimeout(timer)
     }
   }
 
