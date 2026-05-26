@@ -17,8 +17,8 @@ export default function Login() {
       const data = await authApi.login(username, password)
       localStorage.setItem('admin_token', data.token)
       navigate('/providers', { replace: true })
-    } catch {
-      setError('用户名或密码错误')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '用户名或密码错误')
     } finally {
       setIsLoading(false)
     }

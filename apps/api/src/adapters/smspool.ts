@@ -41,15 +41,23 @@ export class SmsPoolAdapter implements SmsProvider {
     let candidates: SuccessRateEntry[] = []
     try {
       const url = `${BASE_URL}/request/success_rate?service=${encodeURIComponent(externalServiceId)}`
-      const res = await fetch(url)
-      if (res.ok) {
-        const data = await res.json()
-        if (Array.isArray(data)) {
-          candidates = data
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 8000)
+      try {
+        const res = await fetch(url, { signal: ctrl.signal })
+        console.log(`[smspool] success_rate status=${res.status}`)
+        if (res.ok) {
+          const data = await res.json()
+          console.log(`[smspool] success_rate data=`, JSON.stringify(data).slice(0, 200))
+          if (Array.isArray(data)) {
+            candidates = data
+          }
         }
+      } finally {
+        clearTimeout(timer)
       }
-    } catch {
-      // ignore, will use fallback
+    } catch (err) {
+      console.error(`[smspool] success_rate fetch error:`, err)
     }
 
     // 过滤成功率达标 + 价格在预算内的国家，按 low_price 升序（优先最便宜）
@@ -76,16 +84,20 @@ export class SmsPoolAdapter implements SmsProvider {
         }
 
         const body = new URLSearchParams(params)
+        const ctrl = new AbortController()
+        const timer = setTimeout(() => ctrl.abort(), 10000)
         const res = await fetch(`${BASE_URL}/purchase/sms`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body,
-        })
+          signal: ctrl.signal,
+        }).finally(() => clearTimeout(timer))
 
+        console.log(`[smspool] purchase/sms country=${country.country_id} status=${res.status}`)
         if (!res.ok) continue
 
         const data = await res.json() as PurchaseResponse
-
+        console.log(`[smspool] purchase/sms response=`, JSON.stringify(data))
         const orderId = data.order_id ?? data.orderid
         if (data.success === 1 && orderId) {
           const phoneNumber = (data.cc && data.phonenumber)
@@ -97,8 +109,8 @@ export class SmsPoolAdapter implements SmsProvider {
             expiresIn: data.expires_in ?? 1200,
           }
         }
-      } catch {
-        // try next country
+      } catch (err) {
+        console.error(`[smspool] purchase/sms country=${country.country_id} error:`, err)
       }
     }
 
@@ -112,11 +124,14 @@ export class SmsPoolAdapter implements SmsProvider {
         orderid: externalOrderId,
       })
 
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 10000)
       const res = await fetch(`${BASE_URL}/sms/check`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body,
-      })
+        signal: ctrl.signal,
+      }).finally(() => clearTimeout(timer))
 
       if (!res.ok) {
         throw new Error('查询订单状态失败')
