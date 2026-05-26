@@ -140,9 +140,11 @@ function StepConfirm({ data, goTo }: StepProps) {
   const { cdk, service, remaining, total } = data
   const dots = Array.from({ length: total }, (_, i) => i < remaining)
   const [isLoading, setIsLoading] = useState(false)
+  const [errorMsg, setErrorMsg] = useState('')
 
   async function handleConfirm() {
     setIsLoading(true)
+    setErrorMsg('')
     try {
       const result = await cdkApi.createOrder(data.cdkId)
       goTo('waiting', {
@@ -151,7 +153,7 @@ function StepConfirm({ data, goTo }: StepProps) {
         expiresIn: result.expiresIn,
       })
     } catch (err) {
-      alert(err instanceof Error ? err.message : '取号失败，请重试')
+      setErrorMsg(err instanceof Error ? err.message : '取号失败，请重试')
     } finally {
       setIsLoading(false)
     }
@@ -202,6 +204,13 @@ function StepConfirm({ data, goTo }: StepProps) {
           ))}
         </div>
       </div>
+
+      {/* Error */}
+      {errorMsg && (
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+          <p className="text-sm text-red-600">{errorMsg}</p>
+        </div>
+      )}
 
       {/* Buttons */}
       <div className="flex gap-3 pt-2">

@@ -39,7 +39,7 @@ function ResultBadge({ status }: { status: string }) {
       </span>
     )
   }
-  if (status === 'timeout') {
+  if (status === 'expired' || status === 'timeout') {
     return (
       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-600">
         超时
@@ -108,7 +108,7 @@ export default function CdkDetail() {
 
   const infoItems = [
     { label: 'CDK 码', value: <span className="font-mono text-gray-800">{detail.code}</span> },
-    { label: '服务', value: detail.serviceName },
+    { label: '服务', value: detail.service?.name ?? detail.serviceName },
     { label: '总次数', value: detail.totalUses },
     { label: '剩余次数', value: detail.remainingUses },
     { label: '状态', value: <StatusBadge status={detail.status} /> },

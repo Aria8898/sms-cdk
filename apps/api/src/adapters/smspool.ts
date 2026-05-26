@@ -41,38 +41,29 @@ export class SmsPoolAdapter implements SmsProvider {
     let candidates: SuccessRateEntry[] = []
     try {
       const url = `${BASE_URL}/request/success_rate?service=${encodeURIComponent(externalServiceId)}`
-      console.log('[smspool] success_rate url:', url)
       const res = await fetch(url)
-      const raw = await res.text()
-      console.log('[smspool] success_rate status:', res.status, 'body:', raw.slice(0, 500))
       if (res.ok) {
-        const data = JSON.parse(raw)
+        const data = await res.json()
         if (Array.isArray(data)) {
           candidates = data
         }
       }
-    } catch (err) {
-      console.log('[smspool] success_rate error:', err)
+    } catch {
+      // ignore, will use fallback
     }
-
-    console.log('[smspool] candidates count:', candidates.length, 'threshold:', options.successRateThreshold)
 
     // 过滤成功率达标 + 价格在预算内的国家，按 low_price 升序（优先最便宜）
     let qualified = candidates
       .filter((c) => c.success_rate >= options.successRateThreshold && parseFloat(c.low_price) <= options.maxPrice)
       .sort((a, b) => parseFloat(a.low_price) - parseFloat(b.low_price))
 
-    console.log('[smspool] qualified after threshold filter:', qualified.length)
-
     // 若无符合条件的国家，取前 3 个作为 fallback
     if (qualified.length === 0) {
       qualified = [...candidates].sort((a, b) => b.success_rate - a.success_rate).slice(0, 3)
-      console.log('[smspool] using fallback countries:', qualified.map(c => c.name))
     }
 
     // 最多尝试前 3 个候选国家
     const toTry = qualified.slice(0, 3)
-    console.log('[smspool] will try countries:', toTry.map(c => `${c.name}(id=${c.name_id})`))
 
     for (const country of toTry) {
       try {
@@ -83,7 +74,6 @@ export class SmsPoolAdapter implements SmsProvider {
           max_price: String(options.maxPrice),
           pricing_option: '0',
         }
-        console.log('[smspool] purchase/sms params (no key):', { ...params, key: '***' })
 
         const body = new URLSearchParams(params)
         const res = await fetch(`${BASE_URL}/purchase/sms`, {
@@ -92,12 +82,9 @@ export class SmsPoolAdapter implements SmsProvider {
           body,
         })
 
-        const raw = await res.text()
-        console.log('[smspool] purchase/sms status:', res.status, 'body:', raw)
-
         if (!res.ok) continue
 
-        const data = JSON.parse(raw) as PurchaseResponse
+        const data = await res.json() as PurchaseResponse
 
         const orderId = data.order_id ?? data.orderid
         if (data.success === 1 && orderId) {
@@ -110,8 +97,8 @@ export class SmsPoolAdapter implements SmsProvider {
             expiresIn: data.expires_in ?? 1200,
           }
         }
-      } catch (err) {
-        console.log('[smspool] purchase/sms error for country', country.country, ':', err)
+      } catch {
+        // try next country
       }
     }
 
