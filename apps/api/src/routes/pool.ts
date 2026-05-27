@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { eq } from 'drizzle-orm'
 import { getDb, services, providers } from '../db'
 import { authMiddleware } from '../middleware/auth'
-import { getProvider } from '../adapters'
+import { getProvider, getApiKey } from '../adapters'
 import type { Bindings } from '../types'
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -43,7 +43,7 @@ app.get('/', async (c) => {
   const blockedSet = new Set(blockedCountries.map(s => s.toUpperCase()))
 
   // 通过 adapter 获取号池原始数据
-  const provider = getProvider(row.providerSlug!, c.env.SMSPOOL_API_KEY)
+  const provider = getProvider(row.providerSlug!, getApiKey(row.providerSlug!, c.env))
   const rawCountries = await provider.getPoolStatus(row.externalServiceId)
 
   // 应用号选策略，打上屏蔽标签、筛选标签和排名

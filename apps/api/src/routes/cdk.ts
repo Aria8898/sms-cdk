@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { eq, and, sql } from 'drizzle-orm'
 import { getDb, cdks, services, orders, providers } from '../db'
-import { getProvider } from '../adapters'
+import { getProvider, getApiKey } from '../adapters'
 import type { Bindings } from '../types'
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -111,7 +111,7 @@ app.post('/order', async (c) => {
 
   // 调用 SMS 适配器
   try {
-    const apiKey = c.env.SMSPOOL_API_KEY
+    const apiKey = getApiKey(row.providerSlug!, c.env)
     const adapter = getProvider(row.providerSlug!, apiKey)
 
     const result = await adapter.orderNumber(row.externalServiceId!, {
@@ -192,7 +192,7 @@ app.get('/order/:orderId/status', async (c) => {
   }
 
   try {
-    const adapter = getProvider(providerRow.slug, c.env.SMSPOOL_API_KEY)
+    const adapter = getProvider(providerRow.slug, getApiKey(providerRow.slug, c.env))
     const pollResult = await adapter.pollOrder(order.externalOrderId)
     const now = new Date().toISOString()
 

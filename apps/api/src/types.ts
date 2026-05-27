@@ -4,4 +4,5 @@ export type Bindings = {
   ADMIN_USERNAME: string
   ADMIN_PASSWORD: string
   SMSPOOL_API_KEY: string
+  SMSBOWER_API_KEY: string
 }
