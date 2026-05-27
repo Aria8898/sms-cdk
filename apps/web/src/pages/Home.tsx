@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { cdkApi } from '../lib/api'
+import type { PoolOption } from '../lib/api'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -18,6 +19,8 @@ interface FlowData {
   code?: string
   errorType?: 'invalid' | 'exhausted' | 'unknown'
   countryCode?: string
+  pools?: PoolOption[]
+  selectedServiceId?: string
 }
 
 type GoTo = (nextStep: Step, patch?: Partial<FlowData>) => void
@@ -84,6 +87,9 @@ function StepInput({ data, goTo }: StepProps) {
     setErrorMsg('')
     try {
       const result = await cdkApi.validate(inputValue.trim())
+      const defaultPool = result.pools.find(p => p.isDefault && p.hasStock)
+        ?? result.pools.find(p => p.hasStock)
+        ?? result.pools[0]
       goTo('confirm', {
         cdk: inputValue.trim(),
         cdkId: result.cdkId,
@@ -91,6 +97,8 @@ function StepInput({ data, goTo }: StepProps) {
         remaining: result.remaining,
         total: result.total,
         countryCode: result.countryCode,
+        pools: result.pools,
+        selectedServiceId: defaultPool?.serviceId,
       })
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : '验证失败')
@@ -163,16 +171,23 @@ function StepInput({ data, goTo }: StepProps) {
 // ─── StepConfirm ─────────────────────────────────────────────────────────────
 
 function StepConfirm({ data, goTo }: StepProps) {
-  const { cdk, service, remaining, total, countryCode } = data
+  const { cdk, service, remaining, total, countryCode, pools = [] } = data
   const dots = Array.from({ length: total }, (_, i) => i < remaining)
   const [isLoading, setIsLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
+
+  // 默认选中：isDefault+有库存 → 任意有库存 → 第一条
+  const initialId = data.selectedServiceId
+    ?? pools.find(p => p.isDefault && p.hasStock)?.serviceId
+    ?? pools.find(p => p.hasStock)?.serviceId
+    ?? pools[0]?.serviceId
+  const [selectedId, setSelectedId] = useState<string | undefined>(initialId)
 
   async function handleConfirm() {
     setIsLoading(true)
     setErrorMsg('')
     try {
-      const result = await cdkApi.createOrder(data.cdkId)
+      const result = await cdkApi.createOrder(data.cdkId, selectedId)
       goTo('waiting', {
         orderId: result.orderId,
         phone: result.phoneNumber,
@@ -216,6 +231,60 @@ function StepConfirm({ data, goTo }: StepProps) {
         </div>
       </div>
 
+      {/* Provider selection */}
+      {pools.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs text-gray-400 uppercase tracking-wide font-medium">选择运营商</p>
+          <div className="space-y-2">
+            {pools.map(pool => {
+              const isSelected = pool.serviceId === selectedId
+              const disabled = !pool.hasStock
+              return (
+                <button
+                  key={pool.serviceId}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => !disabled && setSelectedId(pool.serviceId)}
+                  className={`w-full flex items-center justify-between px-4 py-3 rounded-lg border text-sm transition-colors ${
+                    disabled
+                      ? 'border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed'
+                      : isSelected
+                        ? 'border-blue-500 bg-blue-50 text-gray-900 ring-1 ring-blue-500'
+                        : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    {/* 单选指示点 */}
+                    <span
+                      className={`w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center ${
+                        disabled
+                          ? 'border-gray-300'
+                          : isSelected
+                            ? 'border-blue-500 bg-blue-500'
+                            : 'border-gray-400'
+                      }`}
+                    >
+                      {isSelected && !disabled && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-white" />
+                      )}
+                    </span>
+                    <span className="font-medium">{pool.alias}</span>
+                    {pool.isDefault && !disabled && (
+                      <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-medium border border-green-200">
+                        推荐
+                      </span>
+                    )}
+                  </div>
+                  {disabled && (
+                    <span className="text-xs text-gray-400">暂无库存</span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Remaining */}
       <div className="space-y-2">
         <p className="text-xs text-gray-400 uppercase tracking-wide font-medium">可用次数</p>
@@ -253,7 +322,7 @@ function StepConfirm({ data, goTo }: StepProps) {
         </button>
         <button
           onClick={handleConfirm}
-          disabled={isLoading}
+          disabled={isLoading || !selectedId}
           className="flex-1 py-3 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
         >
           {isLoading ? '取号中...' : '确认兑换'}

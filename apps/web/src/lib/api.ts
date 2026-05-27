@@ -15,12 +15,20 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>
 }
 
+export interface PoolOption {
+  serviceId: string
+  alias: string
+  isDefault: boolean
+  hasStock: boolean
+}
+
 export interface ValidateResult {
   cdkId: string
   service: { name: string }
   remaining: number
   total: number
   countryCode?: string
+  pools: PoolOption[]
 }
 
 export interface OrderResult {
@@ -43,10 +51,10 @@ export const cdkApi = {
       body: JSON.stringify({ code }),
     }),
 
-  createOrder: (cdkId: string) =>
+  createOrder: (cdkId: string, serviceId?: string) =>
     request<OrderResult>('/api/cdk/order', {
       method: 'POST',
-      body: JSON.stringify({ cdkId }),
+      body: JSON.stringify({ cdkId, ...(serviceId ? { serviceId } : {}) }),
     }),
 
   pollOrder: (orderId: string) =>

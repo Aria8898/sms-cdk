@@ -46,6 +46,7 @@ export const cdks = sqliteTable('cdks', {
 export const orders = sqliteTable('orders', {
   id: text('id').primaryKey(),
   cdkId: text('cdk_id').notNull(),
+  serviceId: text('service_id'),
   externalOrderId: text('external_order_id'),
   phoneNumber: text('phone_number'),
   smsContent: text('sms_content'),
@@ -54,4 +55,10 @@ export const orders = sqliteTable('orders', {
   createdAt: text('created_at').notNull(),
   completedAt: text('completed_at'),
   expiresAt: text('expires_at'),
+})
+
+export const poolStatusCache = sqliteTable('pool_status_cache', {
+  serviceId: text('service_id').primaryKey(),
+  data: text('data').notNull(),
+  cachedAt: text('cached_at').notNull(),
 })

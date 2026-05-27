@@ -1,12 +1,155 @@
 import { Hono } from 'hono'
 import { eq, and, sql } from 'drizzle-orm'
-import { getDb, cdks, services, orders, providers, serviceCategories } from '../db'
+import {
+  getDb,
+  cdks,
+  services,
+  orders,
+  providers,
+  serviceCategories,
+  poolStatusCache,
+} from '../db'
 import { getProvider, getApiKey } from '../adapters'
+import type { PoolCountryStatus } from '../adapters/types'
 import type { Bindings } from '../types'
 
 const app = new Hono<{ Bindings: Bindings }>()
 
-// POST /api/cdk/validate
+// ─── Pool 状态缓存 ────────────────────────────────────────────────────────────
+
+const CACHE_TTL_MS = 5 * 60 * 1000  // 5 分钟
+const POOL_FETCH_TIMEOUT = 3000       // 3 秒超时兜底
+
+interface ServiceMeta {
+  id: string
+  externalServiceId: string
+  isDefault: boolean
+  providerSlug: string
+  alias: string
+}
+
+interface PoolEntry {
+  serviceId: string
+  alias: string
+  isDefault: boolean
+  hasStock: boolean
+}
+
+/**
+ * 读取 pool_status_cache；若过期或不存在则并发调用适配器更新。
+ * countryCode 不为空时只检查该国是否有库存。
+ */
+async function resolvePoolEntry(
+  db: ReturnType<typeof getDb>,
+  svc: ServiceMeta,
+  env: Bindings,
+  countryCode: string | undefined,
+  forceRefresh = false,
+): Promise<PoolEntry> {
+  let statusData: PoolCountryStatus[] | null = null
+
+  if (!forceRefresh) {
+    const [cached] = await db
+      .select()
+      .from(poolStatusCache)
+      .where(eq(poolStatusCache.serviceId, svc.id))
+
+    if (cached) {
+      const ageMs = Date.now() - new Date(cached.cachedAt).getTime()
+      if (ageMs < CACHE_TTL_MS) {
+        statusData = JSON.parse(cached.data) as PoolCountryStatus[]
+      }
+    }
+  }
+
+  if (!statusData) {
+    try {
+      const adapter = getProvider(svc.providerSlug, getApiKey(svc.providerSlug, env))
+      statusData = await Promise.race([
+        adapter.getPoolStatus(svc.externalServiceId),
+        new Promise<PoolCountryStatus[]>((_, reject) =>
+          setTimeout(() => reject(new Error('pool status timeout')), POOL_FETCH_TIMEOUT),
+        ),
+      ])
+    } catch (err) {
+      console.warn(`[pool-cache] fetch failed for service ${svc.id}:`, err)
+      statusData = []
+    }
+
+    // 写入 / 更新缓存（尽力，忽略失败）
+    try {
+      const now = new Date().toISOString()
+      await db
+        .insert(poolStatusCache)
+        .values({ serviceId: svc.id, data: JSON.stringify(statusData), cachedAt: now })
+        .onConflictDoUpdate({
+          target: poolStatusCache.serviceId,
+          set: { data: JSON.stringify(statusData), cachedAt: now },
+        })
+    } catch (err) {
+      console.warn(`[pool-cache] write failed for service ${svc.id}:`, err)
+    }
+  }
+
+  let hasStock: boolean
+  if (countryCode) {
+    const upper = countryCode.toUpperCase()
+    const entry = statusData.find(c => String(c.shortName).toUpperCase() === upper)
+    hasStock = (entry?.stock ?? 0) > 0
+  } else {
+    hasStock = statusData.some(c => c.stock > 0)
+  }
+
+  return { serviceId: svc.id, alias: svc.alias, isDefault: svc.isDefault, hasStock }
+}
+
+// ─── 公共：获取某 CDK 关联的所有 ServiceMeta ─────────────────────────────────
+
+async function getServiceMetas(
+  db: ReturnType<typeof getDb>,
+  cdkRow: { categoryId: string | null; serviceId: string },
+): Promise<ServiceMeta[]> {
+  // 确定有效 categoryId
+  let effectiveCategoryId: string | null = cdkRow.categoryId
+  if (!effectiveCategoryId && cdkRow.serviceId) {
+    const [svcRow] = await db
+      .select({ categoryId: services.categoryId })
+      .from(services)
+      .where(eq(services.id, cdkRow.serviceId))
+    effectiveCategoryId = svcRow?.categoryId ?? null
+  }
+
+  if (effectiveCategoryId) {
+    return db
+      .select({
+        id: services.id,
+        externalServiceId: services.externalServiceId,
+        isDefault: services.isDefault,
+        providerSlug: providers.slug,
+        alias: providers.alias,
+      })
+      .from(services)
+      .leftJoin(providers, eq(providers.id, services.providerId))
+      .where(eq(services.categoryId, effectiveCategoryId)) as Promise<ServiceMeta[]>
+  }
+
+  // 旧 CDK：单条 service
+  const [legacy] = await db
+    .select({
+      id: services.id,
+      externalServiceId: services.externalServiceId,
+      isDefault: services.isDefault,
+      providerSlug: providers.slug,
+      alias: providers.alias,
+    })
+    .from(services)
+    .leftJoin(providers, eq(providers.id, services.providerId))
+    .where(eq(services.id, cdkRow.serviceId))
+  return legacy ? [{ ...legacy, isDefault: true } as ServiceMeta] : []
+}
+
+// ─── POST /api/cdk/validate ───────────────────────────────────────────────────
+
 app.post('/validate', async (c) => {
   const body = await c.req.json<{ code: string }>()
   const db = getDb(c.env.DB)
@@ -18,12 +161,13 @@ app.post('/validate', async (c) => {
       remainingUses: cdks.remainingUses,
       totalUses: cdks.totalUses,
       countryCode: cdks.countryCode,
-      // 优先从 category 取服务名，向下兼容旧 CDK 使用 services.name
+      categoryId: cdks.categoryId,
+      serviceId: cdks.serviceId,
       serviceName: sql<string>`COALESCE(${serviceCategories.name}, ${services.name})`.as('service_name'),
     })
     .from(cdks)
     .leftJoin(services, eq(services.id, cdks.serviceId))
-    .leftJoin(serviceCategories, eq(serviceCategories.id, services.categoryId))
+    .leftJoin(serviceCategories, eq(serviceCategories.id, cdks.categoryId))
     .where(eq(cdks.code, body.code))
 
   if (!row) {
@@ -48,21 +192,28 @@ app.post('/validate', async (c) => {
     return c.json({ error: 'CDK 正在使用中，请等待当前流程完成' }, 400)
   }
 
+  // 并发查询各运营商号池缓存
+  const serviceMetas = await getServiceMetas(db, { categoryId: row.categoryId, serviceId: row.serviceId })
+  const pools = await Promise.all(
+    serviceMetas.map(svc => resolvePoolEntry(db, svc, c.env, row.countryCode ?? undefined)),
+  )
+
   return c.json({
     cdkId: row.id,
     service: { name: row.serviceName },
     remaining: row.remainingUses,
     total: row.totalUses,
     countryCode: row.countryCode ?? undefined,
+    pools,
   })
 })
 
-// POST /api/cdk/order
+// ─── POST /api/cdk/order ─────────────────────────────────────────────────────
+
 app.post('/order', async (c) => {
-  const body = await c.req.json<{ cdkId: string }>()
+  const body = await c.req.json<{ cdkId: string; serviceId?: string }>()
   const db = getDb(c.env.DB)
 
-  // 查 CDK 基本信息（防并发再次验证）
   const [cdkRow] = await db
     .select({
       cdkId: cdks.id,
@@ -96,19 +247,44 @@ app.post('/order', async (c) => {
     return c.json({ error: 'CDK 正在使用中，请等待当前流程完成' }, 400)
   }
 
-  // 根据 category_id 动态查 default service；旧 CDK 无 category_id 则回落到 service_id
-  let serviceRow: {
+  // 确定要使用的 service
+  type ServiceRow = {
+    id: string
     externalServiceId: string | null
     maxPrice: number | null
     successRateThreshold: number | null
     blockedCountries: string | null
     providerSlug: string | null
-  } | undefined
+  }
 
-  if (cdkRow.categoryId) {
-    // 新 CDK：从 category 取 isDefault=true 的 smspool service（只取 slug=smspool 的 provider）
+  let serviceRow: ServiceRow | undefined
+
+  if (body.serviceId) {
+    // 前端明确指定 serviceId：校验其属于该 CDK 的 category
+    const serviceMetas = await getServiceMetas(db, { categoryId: cdkRow.categoryId, serviceId: cdkRow.serviceId })
+    const isValid = serviceMetas.some(s => s.id === body.serviceId)
+    if (!isValid) {
+      return c.json({ error: '指定的运营商不属于该 CDK 的服务类型' }, 400)
+    }
+
     const [found] = await db
       .select({
+        id: services.id,
+        externalServiceId: services.externalServiceId,
+        maxPrice: services.maxPrice,
+        successRateThreshold: services.successRateThreshold,
+        blockedCountries: services.blockedCountries,
+        providerSlug: providers.slug,
+      })
+      .from(services)
+      .leftJoin(providers, eq(providers.id, services.providerId))
+      .where(eq(services.id, body.serviceId))
+    serviceRow = found
+  } else if (cdkRow.categoryId) {
+    // 新 CDK：从 category 取 isDefault=true 的 service
+    const [found] = await db
+      .select({
+        id: services.id,
         externalServiceId: services.externalServiceId,
         maxPrice: services.maxPrice,
         successRateThreshold: services.successRateThreshold,
@@ -120,9 +296,9 @@ app.post('/order', async (c) => {
       .where(and(eq(services.categoryId, cdkRow.categoryId), eq(services.isDefault, true)))
 
     if (!found) {
-      // 无 default，取第一条
       const [fallback] = await db
         .select({
+          id: services.id,
           externalServiceId: services.externalServiceId,
           maxPrice: services.maxPrice,
           successRateThreshold: services.successRateThreshold,
@@ -141,6 +317,7 @@ app.post('/order', async (c) => {
     // 旧 CDK：直接用 service_id
     const [legacy] = await db
       .select({
+        id: services.id,
         externalServiceId: services.externalServiceId,
         maxPrice: services.maxPrice,
         successRateThreshold: services.successRateThreshold,
@@ -157,18 +334,18 @@ app.post('/order', async (c) => {
     return c.json({ error: '找不到可用的服务提供商，请联系管理员' }, 500)
   }
 
-  // 插入 pending 订单
+  // 插入 pending 订单（记录 service_id）
   const orderId = crypto.randomUUID()
   const now = new Date().toISOString()
 
   await db.insert(orders).values({
     id: orderId,
     cdkId: body.cdkId,
+    serviceId: serviceRow.id,
     status: 'pending',
     createdAt: now,
   })
 
-  // 调用 SMS 适配器
   try {
     const apiKey = getApiKey(serviceRow.providerSlug, c.env)
     const adapter = getProvider(serviceRow.providerSlug, apiKey)
@@ -184,18 +361,10 @@ app.post('/order', async (c) => {
 
     await db
       .update(orders)
-      .set({
-        externalOrderId: result.orderId,
-        phoneNumber: result.phoneNumber,
-        expiresAt,
-      })
+      .set({ externalOrderId: result.orderId, phoneNumber: result.phoneNumber, expiresAt })
       .where(eq(orders.id, orderId))
 
-    return c.json({
-      orderId,
-      phoneNumber: result.phoneNumber,
-      expiresIn: result.expiresIn,
-    })
+    return c.json({ orderId, phoneNumber: result.phoneNumber, expiresIn: result.expiresIn })
   } catch (err) {
     await db
       .update(orders)
@@ -207,7 +376,8 @@ app.post('/order', async (c) => {
   }
 })
 
-// GET /api/cdk/order/:orderId/status
+// ─── GET /api/cdk/order/:orderId/status ──────────────────────────────────────
+
 app.get('/order/:orderId/status', async (c) => {
   const orderId = c.req.param('orderId')
   const db = getDb(c.env.DB)
@@ -221,7 +391,6 @@ app.get('/order/:orderId/status', async (c) => {
     return c.json({ error: '订单不存在' }, 404)
   }
 
-  // 终态直接返回缓存结果
   if (order.status === 'completed') {
     return c.json({
       status: 'completed',
@@ -234,50 +403,58 @@ app.get('/order/:orderId/status', async (c) => {
     return c.json({ status: order.status })
   }
 
-  // status=pending，调 SMSPool 轮询
   if (!order.externalOrderId) {
     return c.json({ status: 'pending', timeLeft: null })
   }
 
-  // 查 provider slug：优先走 category → default service，旧 CDK 回落 service_id
-  const [cdkMeta] = await db
-    .select({ categoryId: cdks.categoryId, serviceId: cdks.serviceId })
-    .from(cdks)
-    .where(eq(cdks.id, order.cdkId))
-
-  if (!cdkMeta) {
-    return c.json({ error: '无法确定服务提供商' }, 500)
-  }
-
+  // 优先用订单上记录的 service_id；否则回落到 CDK category 的 default service
   let providerSlug: string | null = null
 
-  if (cdkMeta.categoryId) {
+  if (order.serviceId) {
     const [svcRow] = await db
       .select({ slug: providers.slug })
       .from(services)
       .leftJoin(providers, eq(providers.id, services.providerId))
-      .where(and(eq(services.categoryId, cdkMeta.categoryId), eq(services.isDefault, true)))
-      .limit(1)
+      .where(eq(services.id, order.serviceId))
+    providerSlug = svcRow?.slug ?? null
+  }
 
-    if (svcRow?.slug) {
-      providerSlug = svcRow.slug
-    } else {
-      // 无 default，取第一条
-      const [fallback] = await db
+  if (!providerSlug) {
+    const [cdkMeta] = await db
+      .select({ categoryId: cdks.categoryId, serviceId: cdks.serviceId })
+      .from(cdks)
+      .where(eq(cdks.id, order.cdkId))
+
+    if (!cdkMeta) {
+      return c.json({ error: '无法确定服务提供商' }, 500)
+    }
+
+    if (cdkMeta.categoryId) {
+      const [svcRow] = await db
         .select({ slug: providers.slug })
         .from(services)
         .leftJoin(providers, eq(providers.id, services.providerId))
-        .where(eq(services.categoryId, cdkMeta.categoryId))
+        .where(and(eq(services.categoryId, cdkMeta.categoryId), eq(services.isDefault, true)))
         .limit(1)
-      providerSlug = fallback?.slug ?? null
+      providerSlug = svcRow?.slug ?? null
+
+      if (!providerSlug) {
+        const [fallback] = await db
+          .select({ slug: providers.slug })
+          .from(services)
+          .leftJoin(providers, eq(providers.id, services.providerId))
+          .where(eq(services.categoryId, cdkMeta.categoryId))
+          .limit(1)
+        providerSlug = fallback?.slug ?? null
+      }
+    } else {
+      const [legacyRow] = await db
+        .select({ slug: providers.slug })
+        .from(services)
+        .leftJoin(providers, eq(providers.id, services.providerId))
+        .where(eq(services.id, cdkMeta.serviceId))
+      providerSlug = legacyRow?.slug ?? null
     }
-  } else {
-    const [legacyRow] = await db
-      .select({ slug: providers.slug })
-      .from(services)
-      .leftJoin(providers, eq(providers.id, services.providerId))
-      .where(eq(services.id, cdkMeta.serviceId))
-    providerSlug = legacyRow?.slug ?? null
   }
 
   if (!providerSlug) {
@@ -300,16 +477,12 @@ app.get('/order/:orderId/status', async (c) => {
         })
         .where(eq(orders.id, orderId))
 
-      // 扣减 CDK 次数，若减到 0 则标记为 exhausted
       const [cdk] = await db.select().from(cdks).where(eq(cdks.id, order.cdkId))
       if (cdk) {
         const newRemaining = Math.max(0, cdk.remainingUses - 1)
         await db
           .update(cdks)
-          .set({
-            remainingUses: newRemaining,
-            status: newRemaining === 0 ? 'exhausted' : cdk.status,
-          })
+          .set({ remainingUses: newRemaining, status: newRemaining === 0 ? 'exhausted' : cdk.status })
           .where(eq(cdks.id, order.cdkId))
       }
 
@@ -325,11 +498,9 @@ app.get('/order/:orderId/status', async (c) => {
         .update(orders)
         .set({ status: pollResult.status })
         .where(eq(orders.id, orderId))
-
       return c.json({ status: pollResult.status })
     }
 
-    // pending
     return c.json({ status: 'pending', timeLeft: pollResult.timeLeft })
   } catch (err) {
     const message = err instanceof Error ? err.message : '查询状态失败'
