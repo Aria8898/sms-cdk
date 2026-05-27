@@ -62,35 +62,28 @@ app.post('/order', async (c) => {
   const body = await c.req.json<{ cdkId: string }>()
   const db = getDb(c.env.DB)
 
-  // 查 CDK + service + provider（防并发再次验证）
-  const [row] = await db
+  // 查 CDK 基本信息（防并发再次验证）
+  const [cdkRow] = await db
     .select({
       cdkId: cdks.id,
       cdkStatus: cdks.status,
       remainingUses: cdks.remainingUses,
+      categoryId: cdks.categoryId,
       serviceId: cdks.serviceId,
       countryCode: cdks.countryCode,
-      externalServiceId: services.externalServiceId,
-      maxPrice: services.maxPrice,
-      successRateThreshold: services.successRateThreshold,
-      blockedCountries: services.blockedCountries,
-      providerSlug: providers.slug,
-      providerName: providers.name,
     })
     .from(cdks)
-    .leftJoin(services, eq(services.id, cdks.serviceId))
-    .leftJoin(providers, eq(providers.id, services.providerId))
     .where(eq(cdks.id, body.cdkId))
 
-  if (!row) {
+  if (!cdkRow) {
     return c.json({ error: 'CDK 不存在或已失效' }, 404)
   }
 
-  if (row.cdkStatus === 'disabled') {
+  if (cdkRow.cdkStatus === 'disabled') {
     return c.json({ error: 'CDK 已停用' }, 400)
   }
 
-  if (row.remainingUses === 0 || row.cdkStatus === 'exhausted') {
+  if (cdkRow.remainingUses === 0 || cdkRow.cdkStatus === 'exhausted') {
     return c.json({ error: 'CDK 次数已用完' }, 400)
   }
 
@@ -101,6 +94,67 @@ app.post('/order', async (c) => {
 
   if (pendingRow.count > 0) {
     return c.json({ error: 'CDK 正在使用中，请等待当前流程完成' }, 400)
+  }
+
+  // 根据 category_id 动态查 default service；旧 CDK 无 category_id 则回落到 service_id
+  let serviceRow: {
+    externalServiceId: string | null
+    maxPrice: number | null
+    successRateThreshold: number | null
+    blockedCountries: string | null
+    providerSlug: string | null
+  } | undefined
+
+  if (cdkRow.categoryId) {
+    // 新 CDK：从 category 取 isDefault=true 的 smspool service（只取 slug=smspool 的 provider）
+    const [found] = await db
+      .select({
+        externalServiceId: services.externalServiceId,
+        maxPrice: services.maxPrice,
+        successRateThreshold: services.successRateThreshold,
+        blockedCountries: services.blockedCountries,
+        providerSlug: providers.slug,
+      })
+      .from(services)
+      .leftJoin(providers, eq(providers.id, services.providerId))
+      .where(and(eq(services.categoryId, cdkRow.categoryId), eq(services.isDefault, true)))
+
+    if (!found) {
+      // 无 default，取第一条
+      const [fallback] = await db
+        .select({
+          externalServiceId: services.externalServiceId,
+          maxPrice: services.maxPrice,
+          successRateThreshold: services.successRateThreshold,
+          blockedCountries: services.blockedCountries,
+          providerSlug: providers.slug,
+        })
+        .from(services)
+        .leftJoin(providers, eq(providers.id, services.providerId))
+        .where(eq(services.categoryId, cdkRow.categoryId))
+        .limit(1)
+      serviceRow = fallback
+    } else {
+      serviceRow = found
+    }
+  } else {
+    // 旧 CDK：直接用 service_id
+    const [legacy] = await db
+      .select({
+        externalServiceId: services.externalServiceId,
+        maxPrice: services.maxPrice,
+        successRateThreshold: services.successRateThreshold,
+        blockedCountries: services.blockedCountries,
+        providerSlug: providers.slug,
+      })
+      .from(services)
+      .leftJoin(providers, eq(providers.id, services.providerId))
+      .where(eq(services.id, cdkRow.serviceId))
+    serviceRow = legacy
+  }
+
+  if (!serviceRow?.providerSlug) {
+    return c.json({ error: '找不到可用的服务提供商，请联系管理员' }, 500)
   }
 
   // 插入 pending 订单
@@ -116,14 +170,14 @@ app.post('/order', async (c) => {
 
   // 调用 SMS 适配器
   try {
-    const apiKey = getApiKey(row.providerSlug!, c.env)
-    const adapter = getProvider(row.providerSlug!, apiKey)
+    const apiKey = getApiKey(serviceRow.providerSlug, c.env)
+    const adapter = getProvider(serviceRow.providerSlug, apiKey)
 
-    const result = await adapter.orderNumber(row.externalServiceId!, {
-      maxPrice: row.maxPrice!,
-      successRateThreshold: row.successRateThreshold!,
-      blockedCountries: JSON.parse(row.blockedCountries ?? '[]') as string[],
-      countryCode: row.countryCode ?? undefined,
+    const result = await adapter.orderNumber(serviceRow.externalServiceId!, {
+      maxPrice: serviceRow.maxPrice!,
+      successRateThreshold: serviceRow.successRateThreshold!,
+      blockedCountries: JSON.parse(serviceRow.blockedCountries ?? '[]') as string[],
+      countryCode: cdkRow.countryCode ?? undefined,
     })
 
     const expiresAt = new Date(Date.now() + result.expiresIn * 1000).toISOString()
@@ -185,20 +239,53 @@ app.get('/order/:orderId/status', async (c) => {
     return c.json({ status: 'pending', timeLeft: null })
   }
 
-  // 查 provider slug: order → cdkId → cdk → serviceId → service → providerId → provider
-  const [providerRow] = await db
-    .select({ slug: providers.slug })
+  // 查 provider slug：优先走 category → default service，旧 CDK 回落 service_id
+  const [cdkMeta] = await db
+    .select({ categoryId: cdks.categoryId, serviceId: cdks.serviceId })
     .from(cdks)
-    .leftJoin(services, eq(services.id, cdks.serviceId))
-    .leftJoin(providers, eq(providers.id, services.providerId))
     .where(eq(cdks.id, order.cdkId))
 
-  if (!providerRow?.slug) {
+  if (!cdkMeta) {
+    return c.json({ error: '无法确定服务提供商' }, 500)
+  }
+
+  let providerSlug: string | null = null
+
+  if (cdkMeta.categoryId) {
+    const [svcRow] = await db
+      .select({ slug: providers.slug })
+      .from(services)
+      .leftJoin(providers, eq(providers.id, services.providerId))
+      .where(and(eq(services.categoryId, cdkMeta.categoryId), eq(services.isDefault, true)))
+      .limit(1)
+
+    if (svcRow?.slug) {
+      providerSlug = svcRow.slug
+    } else {
+      // 无 default，取第一条
+      const [fallback] = await db
+        .select({ slug: providers.slug })
+        .from(services)
+        .leftJoin(providers, eq(providers.id, services.providerId))
+        .where(eq(services.categoryId, cdkMeta.categoryId))
+        .limit(1)
+      providerSlug = fallback?.slug ?? null
+    }
+  } else {
+    const [legacyRow] = await db
+      .select({ slug: providers.slug })
+      .from(services)
+      .leftJoin(providers, eq(providers.id, services.providerId))
+      .where(eq(services.id, cdkMeta.serviceId))
+    providerSlug = legacyRow?.slug ?? null
+  }
+
+  if (!providerSlug) {
     return c.json({ error: '无法确定服务提供商' }, 500)
   }
 
   try {
-    const adapter = getProvider(providerRow.slug, getApiKey(providerRow.slug, c.env))
+    const adapter = getProvider(providerSlug, getApiKey(providerSlug, c.env))
     const pollResult = await adapter.pollOrder(order.externalOrderId)
     const now = new Date().toISOString()
 
