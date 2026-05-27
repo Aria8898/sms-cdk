@@ -25,7 +25,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 // ---- Types ----
 export interface Provider {
-  id: string; name: string; slug: string; createdAt: string; serviceCount?: number
+  id: string; name: string; alias: string; createdAt: string; serviceCount?: number
 }
 export interface Service {
   id: string; providerId: string; providerName: string; name: string; shortName: string
@@ -57,8 +57,10 @@ export const authApi = {
 // ---- Providers ----
 export const providersApi = {
   list: () => request<Provider[]>('/api/providers'),
-  create: (data: { name: string; slug: string }) =>
+  create: (data: { name: string; slug: string; alias: string }) =>
     request<Provider>('/api/providers', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: { alias: string }) =>
+    request<Provider>(`/api/providers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) =>
     request<{ success: boolean }>(`/api/providers/${id}`, { method: 'DELETE' }),
 }

@@ -4,6 +4,7 @@ export const providers = sqliteTable('providers', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   slug: text('slug').notNull().unique(),
+  alias: text('alias').notNull().default(''),
   createdAt: text('created_at').notNull(),
 })
 

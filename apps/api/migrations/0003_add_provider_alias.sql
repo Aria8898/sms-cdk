@@ -1,0 +1,1 @@
+ALTER TABLE providers ADD COLUMN alias TEXT NOT NULL DEFAULT '';
