@@ -8,9 +8,19 @@ export const providers = sqliteTable('providers', {
   createdAt: text('created_at').notNull(),
 })
 
+export const serviceCategories = sqliteTable('service_categories', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  shortName: text('short_name').notNull(),
+  createdAt: text('created_at').notNull(),
+})
+
 export const services = sqliteTable('services', {
   id: text('id').primaryKey(),
   providerId: text('provider_id').notNull(),
+  categoryId: text('category_id'),
+  isDefault: integer('is_default', { mode: 'boolean' }).notNull().default(false),
+  // name / shortName kept for legacy data and CDK code generation fallback
   name: text('name').notNull(),
   shortName: text('short_name').notNull(),
   externalServiceId: text('external_service_id').notNull(),

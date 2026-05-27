@@ -27,11 +27,23 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export interface Provider {
   id: string; name: string; alias: string; createdAt: string; serviceCount?: number
 }
+export interface ServiceCategory {
+  id: string; name: string; shortName: string; createdAt: string
+  services: Service[]
+}
 export interface Service {
-  id: string; providerId: string; providerName: string; name: string; shortName: string
-  externalServiceId: string; successRateThreshold: number; maxPrice: number
+  id: string
+  providerId: string
+  providerName: string
+  providerAlias: string
+  categoryId: string
+  isDefault: boolean
+  externalServiceId: string
+  successRateThreshold: number
+  maxPrice: number
   blockedCountries: string[]
-  createdAt: string; cdkCount?: number
+  createdAt: string
+  cdkCount?: number
 }
 export interface Cdk {
   id: string; code: string; serviceId: string; serviceName: string
@@ -65,13 +77,38 @@ export const providersApi = {
     request<{ success: boolean }>(`/api/providers/${id}`, { method: 'DELETE' }),
 }
 
+// ---- Service Categories ----
+export const serviceCategoriesApi = {
+  list: () => request<Array<ServiceCategory & { serviceCount?: number }>>('/api/service-categories'),
+  create: (data: { name: string; shortName: string }) =>
+    request<ServiceCategory>('/api/service-categories', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: { name?: string; shortName?: string }) =>
+    request<ServiceCategory>(`/api/service-categories/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (id: string) =>
+    request<{ success: boolean }>(`/api/service-categories/${id}`, { method: 'DELETE' }),
+  migrate: () =>
+    request<{ migrated: number; categories: number; message: string }>('/api/service-categories/migrate', { method: 'POST' }),
+}
+
 // ---- Services ----
 export const servicesApi = {
-  list: () => request<Service[]>('/api/services'),
-  create: (data: Omit<Service, 'id' | 'providerName' | 'createdAt' | 'cdkCount'>) =>
-    request<Service>('/api/services', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: string, data: { successRateThreshold?: number; maxPrice?: number; blockedCountries?: string[] }) =>
-    request<Service>(`/api/services/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  // 返回 ServiceCategory[] 分组视图
+  list: () => request<ServiceCategory[]>('/api/services'),
+  create: (data: {
+    categoryId: string
+    providerId: string
+    externalServiceId: string
+    isDefault?: boolean
+    successRateThreshold?: number
+    maxPrice?: number
+    blockedCountries?: string[]
+  }) => request<Service>('/api/services', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: {
+    successRateThreshold?: number
+    maxPrice?: number
+    blockedCountries?: string[]
+    isDefault?: boolean
+  }) => request<Service>(`/api/services/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) =>
     request<{ success: boolean }>(`/api/services/${id}`, { method: 'DELETE' }),
 }

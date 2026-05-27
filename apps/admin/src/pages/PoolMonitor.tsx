@@ -1,11 +1,19 @@
 import { useState, useEffect } from 'react'
-import { providersApi, servicesApi, poolApi, type Provider, type Service, type PoolCountry, type PoolStatusResult } from '../lib/api'
+import { providersApi, servicesApi, poolApi, type Provider, type Service, type ServiceCategory, type PoolCountry, type PoolStatusResult } from '../lib/api'
 
 type TabValue = 'all' | 'qualified' | 'blocked'
 
+interface FlatService extends Service {
+  categoryName: string
+}
+
+function flattenCategories(cats: ServiceCategory[]): FlatService[] {
+  return cats.flatMap(cat => cat.services.map(s => ({ ...s, categoryName: cat.name })))
+}
+
 export default function PoolMonitor() {
   const [providers, setProviders] = useState<Provider[]>([])
-  const [services, setServices] = useState<Service[]>([])
+  const [services, setServices] = useState<FlatService[]>([])
   const [selectedProviderId, setSelectedProviderId] = useState('')
   const [selectedServiceId, setSelectedServiceId] = useState('')
   const [result, setResult] = useState<PoolStatusResult | null>(null)
@@ -17,10 +25,11 @@ export default function PoolMonitor() {
   useEffect(() => {
     async function init() {
       try {
-        const [provData, svcData] = await Promise.all([
+        const [provData, cats] = await Promise.all([
           providersApi.list(),
           servicesApi.list(),
         ])
+        const svcData = flattenCategories(cats)
         setProviders(provData)
         setServices(svcData)
         if (provData.length > 0) {
@@ -118,7 +127,7 @@ export default function PoolMonitor() {
           >
             {filteredServices.length === 0 && <option value="">暂无 Service</option>}
             {filteredServices.map(s => (
-              <option key={s.id} value={s.id}>{s.name}</option>
+              <option key={s.id} value={s.id}>{s.categoryName}</option>
             ))}
           </select>
         </div>

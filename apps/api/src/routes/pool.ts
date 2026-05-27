@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
-import { eq } from 'drizzle-orm'
-import { getDb, services, providers } from '../db'
+import { eq, sql } from 'drizzle-orm'
+import { getDb, services, serviceCategories, providers } from '../db'
 import { authMiddleware } from '../middleware/auth'
 import { getProvider, getApiKey } from '../adapters'
 import type { Bindings } from '../types'
@@ -23,7 +23,7 @@ app.get('/', async (c) => {
   const [row] = await db
     .select({
       id: services.id,
-      name: services.name,
+      name: sql<string>`COALESCE(${serviceCategories.name}, ${services.name})`.as('name'),
       externalServiceId: services.externalServiceId,
       successRateThreshold: services.successRateThreshold,
       maxPrice: services.maxPrice,
@@ -33,6 +33,7 @@ app.get('/', async (c) => {
     })
     .from(services)
     .leftJoin(providers, eq(providers.id, services.providerId))
+    .leftJoin(serviceCategories, eq(serviceCategories.id, services.categoryId))
     .where(eq(services.id, serviceId))
 
   if (!row) {

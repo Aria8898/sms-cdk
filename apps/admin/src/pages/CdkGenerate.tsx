@@ -1,10 +1,21 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { servicesApi, cdksApi, type Service, type Cdk } from '../lib/api'
+import { servicesApi, cdksApi, type Service, type ServiceCategory, type Cdk } from '../lib/api'
+
+interface FlatService extends Service {
+  categoryName: string
+  categoryShortName: string
+}
+
+function flattenCategories(cats: ServiceCategory[]): FlatService[] {
+  return cats.flatMap(cat =>
+    cat.services.map(s => ({ ...s, categoryName: cat.name, categoryShortName: cat.shortName }))
+  )
+}
 
 export default function CdkGenerate() {
   const navigate = useNavigate()
-  const [services, setServices] = useState<Service[]>([])
+  const [services, setServices] = useState<FlatService[]>([])
   const [isLoadingServices, setIsLoadingServices] = useState(true)
   const [serviceId, setServiceId] = useState('')
   const [usesPerCdk, setUsesPerCdk] = useState(1)
@@ -17,10 +28,11 @@ export default function CdkGenerate() {
     async function loadServices() {
       setIsLoadingServices(true)
       try {
-        const data = await servicesApi.list()
-        setServices(data)
-        if (data.length > 0) {
-          setServiceId(data[0].id)
+        const cats = await servicesApi.list()
+        const flat = flattenCategories(cats)
+        setServices(flat)
+        if (flat.length > 0) {
+          setServiceId(flat[0].id)
         }
       } catch (err) {
         alert(err instanceof Error ? err.message : '加载服务列表失败')
@@ -32,7 +44,7 @@ export default function CdkGenerate() {
   }, [])
 
   const selectedService = services.find(s => s.id === serviceId)
-  const preview = selectedService ? `${selectedService.shortName}-XXXX-XXXX-XXXX` : 'XXXX-XXXX-XXXX-XXXX'
+  const preview = selectedService ? `${selectedService.categoryShortName}-XXXX-XXXX-XXXX` : 'XXXX-XXXX-XXXX-XXXX'
 
   async function handleGenerate() {
     if (!serviceId) return
@@ -82,7 +94,7 @@ export default function CdkGenerate() {
                 <option>加载中...</option>
               ) : (
                 services.map(s => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
+                  <option key={s.id} value={s.id}>{s.categoryName} · {s.providerAlias || s.providerName}</option>
                 ))
               )}
             </select>

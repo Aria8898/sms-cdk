@@ -3,6 +3,7 @@ import { cors } from 'hono/cors'
 import type { Bindings } from './types'
 import authRoute from './routes/auth'
 import providersRoute from './routes/providers'
+import serviceCategoriesRoute from './routes/service-categories'
 import servicesRoute from './routes/services'
 import cdksRoute from './routes/cdks'
 import cdkRoute from './routes/cdk'
@@ -18,6 +19,7 @@ app.use('*', cors({
 
 app.route('/api/auth', authRoute)
 app.route('/api/providers', providersRoute)
+app.route('/api/service-categories', serviceCategoriesRoute)
 app.route('/api/services', servicesRoute)
 app.route('/api/cdks', cdksRoute)
 app.route('/api/cdk', cdkRoute)

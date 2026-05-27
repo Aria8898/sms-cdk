@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { eq, sql, and } from 'drizzle-orm'
-import { getDb, cdks, services, orders } from '../db'
+import { getDb, cdks, services, serviceCategories, orders } from '../db'
 import { authMiddleware } from '../middleware/auth'
 import type { Bindings } from '../types'
 
@@ -37,7 +37,7 @@ app.get('/', async (c) => {
       remainingUses: cdks.remainingUses,
       status: cdks.status,
       createdAt: cdks.createdAt,
-      serviceName: services.name,
+      serviceName: sql<string>`COALESCE(${serviceCategories.name}, ${services.name})`.as('service_name'),
       hasPendingOrder: sql<number>`
         CASE WHEN EXISTS (
           SELECT 1 FROM orders WHERE orders.cdk_id = ${cdks.id} AND orders.status = 'pending'
@@ -46,6 +46,7 @@ app.get('/', async (c) => {
     })
     .from(cdks)
     .leftJoin(services, eq(services.id, cdks.serviceId))
+    .leftJoin(serviceCategories, eq(serviceCategories.id, services.categoryId))
 
   const result = rows.map((row) => ({
     ...row,
@@ -72,8 +73,16 @@ app.post('/generate', async (c) => {
 
   const db = getDb(c.env.DB)
 
-  const [service] = await db.select().from(services).where(eq(services.id, body.serviceId))
-  if (!service) {
+  const [serviceRow] = await db
+    .select({
+      id: services.id,
+      shortName: sql<string>`COALESCE(${serviceCategories.shortName}, ${services.shortName})`.as('short_name'),
+    })
+    .from(services)
+    .leftJoin(serviceCategories, eq(serviceCategories.id, services.categoryId))
+    .where(eq(services.id, body.serviceId))
+
+  if (!serviceRow) {
     return c.json({ error: 'Service not found' }, 400)
   }
 
@@ -82,7 +91,7 @@ app.post('/generate', async (c) => {
 
   for (let i = 0; i < body.quantity; i++) {
     const id = crypto.randomUUID()
-    const code = generateCdkCode(service.shortName)
+    const code = generateCdkCode(serviceRow.shortName)
     newCdks.push({
       id,
       code,
