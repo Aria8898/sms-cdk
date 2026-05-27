@@ -109,6 +109,14 @@ export default function CdkDetail() {
   const infoItems = [
     { label: 'CDK 码', value: <span className="font-mono text-gray-800">{detail.code}</span> },
     { label: '服务', value: detail.service?.name ?? detail.serviceName },
+    {
+      label: '国家',
+      value: detail.countryCode ? (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-200 font-mono">
+          {detail.countryCode} 专属
+        </span>
+      ) : <span className="text-gray-400 text-xs">不限</span>,
+    },
     { label: '总次数', value: detail.totalUses },
     { label: '剩余次数', value: detail.remainingUses },
     { label: '状态', value: <StatusBadge status={detail.status} /> },

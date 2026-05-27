@@ -47,6 +47,7 @@ export interface Service {
 }
 export interface Cdk {
   id: string; code: string; serviceId: string; serviceName: string
+  categoryId: string | null; countryCode: string | null
   totalUses: number; remainingUses: number; status: string
   hasPendingOrder: boolean; createdAt: string
 }
@@ -153,7 +154,7 @@ export const poolApi = {
 export const cdksApi = {
   list: (status?: string) =>
     request<Cdk[]>(`/api/cdks${status ? `?status=${status}` : ''}`),
-  generate: (data: { serviceId: string; usesPerCdk: number; quantity: number }) =>
+  generate: (data: { categoryId: string; usesPerCdk: number; quantity: number; countryCode?: string }) =>
     request<{ cdks: Cdk[] }>('/api/cdks/generate', { method: 'POST', body: JSON.stringify(data) }),
   detail: (id: string) => request<CdkDetail>(`/api/cdks/${id}`),
   disable: (id: string) =>

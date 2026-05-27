@@ -60,6 +60,59 @@ export class SmsPoolAdapter implements SmsProvider {
       console.error(`[smspool] success_rate fetch error:`, err)
     }
 
+    // 若指定了国家专属（countryCode），只尝试该国家，无库存直接报错
+    if (options.countryCode) {
+      const targetCode = options.countryCode.toUpperCase()
+      const target = candidates.find(c => c.short_name.toUpperCase() === targetCode)
+      if (!target) {
+        throw new Error(`该 CDK 仅限 ${targetCode} 国家使用，但该国家暂无可用号码`)
+      }
+      const toTry = [target]
+
+      for (const country of toTry) {
+        try {
+          const params = {
+            key: this.apiKey,
+            country: String(country.country_id),
+            service: externalServiceId,
+            max_price: String(options.maxPrice),
+            pricing_option: '0',
+          }
+
+          const body = new URLSearchParams(params)
+          const ctrl = new AbortController()
+          const timer = setTimeout(() => ctrl.abort(), 10000)
+          const res = await fetch(`${BASE_URL}/purchase/sms`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body,
+            signal: ctrl.signal,
+          }).finally(() => clearTimeout(timer))
+
+          console.log(`[smspool] purchase/sms country=${country.country_id} (${targetCode}) status=${res.status}`)
+          if (!res.ok) throw new Error(`该 CDK 仅限 ${targetCode} 国家使用，但该国家暂无可用号码`)
+
+          const data = await res.json() as PurchaseResponse
+          console.log(`[smspool] purchase/sms response=`, JSON.stringify(data))
+          const orderId = data.order_id ?? data.orderid
+          if (data.success === 1 && orderId) {
+            const phoneNumber = (data.cc && data.phonenumber)
+              ? `+${data.cc}${data.phonenumber}`
+              : String(data.number ?? '')
+            return {
+              orderId,
+              phoneNumber,
+              expiresIn: data.expires_in ?? 1200,
+            }
+          }
+        } catch (err) {
+          console.error(`[smspool] purchase/sms country=${country.country_id} (${targetCode}) error:`, err)
+        }
+      }
+
+      throw new Error(`该 CDK 仅限 ${targetCode} 国家使用，但该国家暂无可用号码`)
+    }
+
     // 屏蔽名单（shortName 大写比较）
     const blockedSet = new Set((options.blockedCountries ?? []).map(s => s.toUpperCase()))
     const isBlocked = (c: SuccessRateEntry) => blockedSet.size > 0 && blockedSet.has(c.short_name.toUpperCase())

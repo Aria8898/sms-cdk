@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { eq, and, sql } from 'drizzle-orm'
-import { getDb, cdks, services, orders, providers } from '../db'
+import { getDb, cdks, services, orders, providers, serviceCategories } from '../db'
 import { getProvider, getApiKey } from '../adapters'
 import type { Bindings } from '../types'
 
@@ -17,10 +17,13 @@ app.post('/validate', async (c) => {
       status: cdks.status,
       remainingUses: cdks.remainingUses,
       totalUses: cdks.totalUses,
-      serviceName: services.name,
+      countryCode: cdks.countryCode,
+      // 优先从 category 取服务名，向下兼容旧 CDK 使用 services.name
+      serviceName: sql<string>`COALESCE(${serviceCategories.name}, ${services.name})`.as('service_name'),
     })
     .from(cdks)
     .leftJoin(services, eq(services.id, cdks.serviceId))
+    .leftJoin(serviceCategories, eq(serviceCategories.id, services.categoryId))
     .where(eq(cdks.code, body.code))
 
   if (!row) {
@@ -50,6 +53,7 @@ app.post('/validate', async (c) => {
     service: { name: row.serviceName },
     remaining: row.remainingUses,
     total: row.totalUses,
+    countryCode: row.countryCode ?? undefined,
   })
 })
 
@@ -65,6 +69,7 @@ app.post('/order', async (c) => {
       cdkStatus: cdks.status,
       remainingUses: cdks.remainingUses,
       serviceId: cdks.serviceId,
+      countryCode: cdks.countryCode,
       externalServiceId: services.externalServiceId,
       maxPrice: services.maxPrice,
       successRateThreshold: services.successRateThreshold,
@@ -118,6 +123,7 @@ app.post('/order', async (c) => {
       maxPrice: row.maxPrice!,
       successRateThreshold: row.successRateThreshold!,
       blockedCountries: JSON.parse(row.blockedCountries ?? '[]') as string[],
+      countryCode: row.countryCode ?? undefined,
     })
 
     const expiresAt = new Date(Date.now() + result.expiresIn * 1000).toISOString()

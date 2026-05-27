@@ -34,6 +34,9 @@ export const cdks = sqliteTable('cdks', {
   id: text('id').primaryKey(),
   code: text('code').notNull().unique(),
   serviceId: text('service_id').notNull(),
+  // Step 3: 新增 category_id（直接关联 service_categories）和 country_code
+  categoryId: text('category_id'),
+  countryCode: text('country_code'),
   totalUses: integer('total_uses').notNull(),
   remainingUses: integer('remaining_uses').notNull(),
   status: text('status').notNull().default('active'),

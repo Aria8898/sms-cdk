@@ -1,23 +1,13 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { servicesApi, cdksApi, type Service, type ServiceCategory, type Cdk } from '../lib/api'
-
-interface FlatService extends Service {
-  categoryName: string
-  categoryShortName: string
-}
-
-function flattenCategories(cats: ServiceCategory[]): FlatService[] {
-  return cats.flatMap(cat =>
-    cat.services.map(s => ({ ...s, categoryName: cat.name, categoryShortName: cat.shortName }))
-  )
-}
+import { serviceCategoriesApi, cdksApi, type ServiceCategory, type Cdk } from '../lib/api'
 
 export default function CdkGenerate() {
   const navigate = useNavigate()
-  const [services, setServices] = useState<FlatService[]>([])
-  const [isLoadingServices, setIsLoadingServices] = useState(true)
-  const [serviceId, setServiceId] = useState('')
+  const [categories, setCategories] = useState<ServiceCategory[]>([])
+  const [isLoadingCategories, setIsLoadingCategories] = useState(true)
+  const [categoryId, setCategoryId] = useState('')
+  const [countryCode, setCountryCode] = useState('')
   const [usesPerCdk, setUsesPerCdk] = useState(1)
   const [quantity, setQuantity] = useState(10)
   const [generated, setGenerated] = useState<Cdk[]>([])
@@ -25,32 +15,44 @@ export default function CdkGenerate() {
   const [isGenerating, setIsGenerating] = useState(false)
 
   useEffect(() => {
-    async function loadServices() {
-      setIsLoadingServices(true)
+    async function loadCategories() {
+      setIsLoadingCategories(true)
       try {
-        const cats = await servicesApi.list()
-        const flat = flattenCategories(cats)
-        setServices(flat)
-        if (flat.length > 0) {
-          setServiceId(flat[0].id)
+        const cats = await serviceCategoriesApi.list()
+        setCategories(cats)
+        if (cats.length > 0) {
+          setCategoryId(cats[0].id)
         }
       } catch (err) {
-        alert(err instanceof Error ? err.message : '加载服务列表失败')
+        alert(err instanceof Error ? err.message : '加载服务分类失败')
       } finally {
-        setIsLoadingServices(false)
+        setIsLoadingCategories(false)
       }
     }
-    loadServices()
+    loadCategories()
   }, [])
 
-  const selectedService = services.find(s => s.id === serviceId)
-  const preview = selectedService ? `${selectedService.categoryShortName}-XXXX-XXXX-XXXX` : 'XXXX-XXXX-XXXX-XXXX'
+  const selectedCategory = categories.find(c => c.id === categoryId)
+  const trimmedCountry = countryCode.trim().toUpperCase()
+  const isCountryValid = !trimmedCountry || /^[A-Z]{2}$/.test(trimmedCountry)
+
+  const preview = selectedCategory
+    ? trimmedCountry && isCountryValid && trimmedCountry.length === 2
+      ? `${selectedCategory.shortName}-${trimmedCountry}-XXXX-XXXX`
+      : `${selectedCategory.shortName}-XXXX-XXXX-XXXX`
+    : 'XXXX-XXXX-XXXX-XXXX'
 
   async function handleGenerate() {
-    if (!serviceId) return
+    if (!categoryId) return
+    if (!isCountryValid) return
     setIsGenerating(true)
     try {
-      const result = await cdksApi.generate({ serviceId, usesPerCdk, quantity })
+      const result = await cdksApi.generate({
+        categoryId,
+        usesPerCdk,
+        quantity,
+        countryCode: trimmedCountry || undefined,
+      })
       setGenerated(result.cdks)
       setCopied(false)
     } catch (err) {
@@ -83,22 +85,43 @@ export default function CdkGenerate() {
       <div className="grid grid-cols-2 gap-6">
         <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-5">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">选择 Service</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">选择服务类型</label>
             <select
-              value={serviceId}
-              onChange={e => setServiceId(e.target.value)}
-              disabled={isLoadingServices}
+              value={categoryId}
+              onChange={e => setCategoryId(e.target.value)}
+              disabled={isLoadingCategories}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
             >
-              {isLoadingServices ? (
+              {isLoadingCategories ? (
                 <option>加载中...</option>
               ) : (
-                services.map(s => (
-                  <option key={s.id} value={s.id}>{s.categoryName} · {s.providerAlias || s.providerName}</option>
+                categories.map(cat => (
+                  <option key={cat.id} value={cat.id}>{cat.name}</option>
                 ))
               )}
             </select>
           </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              指定国家
+              <span className="ml-1 text-xs text-gray-400 font-normal">（可选，ISO 2 字母码如 US、GB、CN）</span>
+            </label>
+            <input
+              type="text"
+              value={countryCode}
+              onChange={e => setCountryCode(e.target.value.toUpperCase().slice(0, 2))}
+              placeholder="不填则为普通 CDK"
+              maxLength={2}
+              className={`w-full px-3 py-2 border rounded-lg text-sm font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                !isCountryValid ? 'border-red-400 focus:ring-red-400' : 'border-gray-300'
+              }`}
+            />
+            {!isCountryValid && (
+              <p className="mt-1 text-xs text-red-500">请输入 2 位大写字母国家码（如 US）</p>
+            )}
+          </div>
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">每张可用次数</label>
             <input
@@ -125,13 +148,18 @@ export default function CdkGenerate() {
             <p className="text-xs text-gray-500 mb-1">CDK 格式预览</p>
             <p className="font-mono text-base text-gray-800 tracking-widest">{preview}</p>
             <p className="text-xs text-gray-400 mt-2">
+              {trimmedCountry && isCountryValid && trimmedCountry.length === 2
+                ? `国家专属格式：{缩写}-{ISO}-XXXX-XXXX`
+                : `普通格式：{缩写}-XXXX-XXXX-XXXX`}
+            </p>
+            <p className="text-xs text-gray-400">
               字符集：A-Z 及 2-9（排除易混淆字符 0 O I L 1）
             </p>
           </div>
 
           <button
             onClick={handleGenerate}
-            disabled={isGenerating || isLoadingServices || !serviceId}
+            disabled={isGenerating || isLoadingCategories || !categoryId || !isCountryValid}
             className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
           >
             {isGenerating ? '生成中...' : '生成'}

@@ -17,6 +17,7 @@ interface FlowData {
   sms?: string
   code?: string
   errorType?: 'invalid' | 'exhausted' | 'unknown'
+  countryCode?: string
 }
 
 type GoTo = (nextStep: Step, patch?: Partial<FlowData>) => void
@@ -28,7 +29,31 @@ interface StepProps {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const CDK_REGEX = /^[A-Z]{2}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/
+/** 将 ISO 2 字母码转换为旗帜 Emoji（如 "US" → "🇺🇸"） */
+function isoToFlag(code: string): string {
+  return [...code.toUpperCase()]
+    .map(c => String.fromCodePoint(c.charCodeAt(0) + 0x1F1A5))
+    .join('')
+}
+
+const COUNTRY_NAMES: Record<string, string> = {
+  US: '美国', GB: '英国', CN: '中国', JP: '日本', KR: '韩国',
+  DE: '德国', FR: '法国', CA: '加拿大', AU: '澳大利亚', IN: '印度',
+  BR: '巴西', RU: '俄罗斯', MX: '墨西哥', ID: '印度尼西亚', PH: '菲律宾',
+  VN: '越南', NG: '尼日利亚', KE: '肯尼亚', SG: '新加坡', MY: '马来西亚',
+}
+
+function countryDisplay(code: string): string {
+  const upper = code.toUpperCase()
+  const flag = isoToFlag(upper)
+  const name = COUNTRY_NAMES[upper] ?? upper
+  return `${flag} ${name}专属`
+}
+
+// 兼容两种格式：
+//   普通：      {2字母}-{4字符}-{4字符}-{4字符}  e.g. OP-A3KF-9ZMR-B72X (17 chars)
+//   国家专属：  {2字母}-{2字母}-{4字符}-{4字符}  e.g. OP-US-A3KF-9ZMR   (15 chars)
+const CDK_REGEX = /^[A-Z]{2}-(?:[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}|[A-Z]{2}-[A-Z0-9]{4}-[A-Z0-9]{4})$/
 
 function pad(n: number) {
   return String(n).padStart(2, '0')
@@ -65,6 +90,7 @@ function StepInput({ data, goTo }: StepProps) {
         service: result.service.name,
         remaining: result.remaining,
         total: result.total,
+        countryCode: result.countryCode,
       })
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : '验证失败')
@@ -93,7 +119,7 @@ function StepInput({ data, goTo }: StepProps) {
             value={inputValue}
             onChange={e => { setInputValue(e.target.value.toUpperCase()); setErrorMsg('') }}
             onKeyDown={handleKeyDown}
-            placeholder="如 OP-XXXX-XXXX-XXXX"
+            placeholder="如 OP-XXXX-XXXX-XXXX 或 OP-US-XXXX-XXXX"
             className={`w-full px-4 py-3 border rounded-lg text-sm focus:outline-none focus:ring-2 transition-colors font-mono tracking-wider ${borderClass}`}
             maxLength={17}
             disabled={isLoading}
@@ -137,7 +163,7 @@ function StepInput({ data, goTo }: StepProps) {
 // ─── StepConfirm ─────────────────────────────────────────────────────────────
 
 function StepConfirm({ data, goTo }: StepProps) {
-  const { cdk, service, remaining, total } = data
+  const { cdk, service, remaining, total, countryCode } = data
   const dots = Array.from({ length: total }, (_, i) => i < remaining)
   const [isLoading, setIsLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
@@ -177,11 +203,16 @@ function StepConfirm({ data, goTo }: StepProps) {
       {/* Service */}
       <div className="space-y-1">
         <p className="text-xs text-gray-400 uppercase tracking-wide font-medium">适用服务</p>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="text-base font-semibold text-gray-800">{service}</span>
           <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium border border-blue-200">
             接码服务
           </span>
+          {countryCode && (
+            <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium border border-indigo-200">
+              {countryDisplay(countryCode)}
+            </span>
+          )}
         </div>
       </div>
 

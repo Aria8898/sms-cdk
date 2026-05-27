@@ -2,6 +2,8 @@ export interface OrderOptions {
   maxPrice: number
   successRateThreshold: number
   blockedCountries: string[]
+  /** ISO 2-letter country code; if set, only this country is attempted */
+  countryCode?: string
 }
 
 export interface OrderResult {

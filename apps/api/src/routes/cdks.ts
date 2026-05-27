@@ -20,7 +20,15 @@ function randomSegment(len: number): string {
   return result
 }
 
-function generateCdkCode(shortName: string): string {
+/**
+ * CDK 格式：
+ *   普通：      {shortName}-XXXX-XXXX-XXXX  (e.g. OP-A3KF-9ZMR-B72X)
+ *   国家专属：  {shortName}-{ISO}-XXXX-XXXX  (e.g. OP-US-A3KF-9ZMR)
+ */
+function generateCdkCode(shortName: string, countryCode?: string): string {
+  if (countryCode) {
+    return `${shortName}-${countryCode.toUpperCase()}-${randomSegment(4)}-${randomSegment(4)}`
+  }
   return `${shortName}-${randomSegment(4)}-${randomSegment(4)}-${randomSegment(4)}`
 }
 
@@ -33,6 +41,8 @@ app.get('/', async (c) => {
       id: cdks.id,
       code: cdks.code,
       serviceId: cdks.serviceId,
+      categoryId: cdks.categoryId,
+      countryCode: cdks.countryCode,
       totalUses: cdks.totalUses,
       remainingUses: cdks.remainingUses,
       status: cdks.status,
@@ -66,36 +76,58 @@ app.get('/', async (c) => {
 
 app.post('/generate', async (c) => {
   const body = await c.req.json<{
-    serviceId: string
+    categoryId: string
     usesPerCdk: number
     quantity: number
+    countryCode?: string
   }>()
 
   const db = getDb(c.env.DB)
 
-  const [serviceRow] = await db
-    .select({
-      id: services.id,
-      shortName: sql<string>`COALESCE(${serviceCategories.shortName}, ${services.shortName})`.as('short_name'),
-    })
-    .from(services)
-    .leftJoin(serviceCategories, eq(serviceCategories.id, services.categoryId))
-    .where(eq(services.id, body.serviceId))
+  // 获取 ServiceCategory 的 shortName
+  const [categoryRow] = await db
+    .select({ id: serviceCategories.id, shortName: serviceCategories.shortName })
+    .from(serviceCategories)
+    .where(eq(serviceCategories.id, body.categoryId))
 
-  if (!serviceRow) {
-    return c.json({ error: 'Service not found' }, 400)
+  if (!categoryRow) {
+    return c.json({ error: 'ServiceCategory not found' }, 400)
   }
+
+  // 找该 category 的默认 service（用于存入 service_id 保持向下兼容）
+  const [defaultService] = await db
+    .select({ id: services.id })
+    .from(services)
+    .where(and(eq(services.categoryId, body.categoryId), eq(services.isDefault, true)))
+
+  // 若无 isDefault 的 service，取第一条
+  const [fallbackService] = defaultService
+    ? [defaultService]
+    : await db
+        .select({ id: services.id })
+        .from(services)
+        .where(eq(services.categoryId, body.categoryId))
+        .limit(1)
+
+  if (!fallbackService) {
+    return c.json({ error: '该 ServiceCategory 下没有可用的 Service，无法生成 CDK' }, 400)
+  }
+
+  const serviceId = fallbackService.id
+  const countryCode = body.countryCode?.trim().toUpperCase() || undefined
 
   const createdAt = new Date().toISOString()
   const newCdks = []
 
   for (let i = 0; i < body.quantity; i++) {
     const id = crypto.randomUUID()
-    const code = generateCdkCode(serviceRow.shortName)
+    const code = generateCdkCode(categoryRow.shortName, countryCode)
     newCdks.push({
       id,
       code,
-      serviceId: body.serviceId,
+      serviceId,
+      categoryId: body.categoryId,
+      countryCode: countryCode ?? null,
       totalUses: body.usesPerCdk,
       remainingUses: body.usesPerCdk,
       status: 'active',

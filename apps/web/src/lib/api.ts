@@ -20,6 +20,7 @@ export interface ValidateResult {
   service: { name: string }
   remaining: number
   total: number
+  countryCode?: string
 }
 
 export interface OrderResult {
