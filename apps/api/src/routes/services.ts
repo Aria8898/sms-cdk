@@ -107,6 +107,7 @@ app.post('/', async (c) => {
 app.put('/:id', async (c) => {
   const id = c.req.param('id')
   const body = await c.req.json<{
+    externalServiceId?: string
     successRateThreshold?: number
     maxPrice?: number
     blockedCountries?: string[]
@@ -127,11 +128,13 @@ app.put('/:id', async (c) => {
   }
 
   const updates: Partial<{
+    externalServiceId: string
     successRateThreshold: number
     maxPrice: number
     blockedCountries: string
     isDefault: boolean
   }> = {}
+  if (body.externalServiceId?.trim()) updates.externalServiceId = body.externalServiceId.trim()
   if (body.successRateThreshold !== undefined) updates.successRateThreshold = body.successRateThreshold
   if (body.maxPrice !== undefined) updates.maxPrice = body.maxPrice
   if (body.blockedCountries !== undefined) updates.blockedCountries = JSON.stringify(body.blockedCountries)

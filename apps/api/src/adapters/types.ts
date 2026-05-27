@@ -13,7 +13,8 @@ export interface OrderResult {
 }
 
 export interface PollResult {
-  status: 'pending' | 'completed' | 'expired' | 'cancelled'
+  /** received = SMSBower STATUS_OK（短信已收到，可选继续接收） */
+  status: 'pending' | 'completed' | 'expired' | 'cancelled' | 'received'
   smsContent?: string
   verificationCode?: string
   timeLeft?: number
@@ -27,6 +28,10 @@ export interface PoolCountryStatus {
   lowPrice: number
   successRate: number
   stock: number
+  /** SMSBower：等级 Gold / Silver / Bronze */
+  rank?: 'Gold' | 'Silver' | 'Bronze'
+  /** SMSBower：该 position 的供应商 ID 列表 */
+  agentIds?: string[]
 }
 
 export interface SmsProvider {

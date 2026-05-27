@@ -1,7 +1,11 @@
 import { useState, useEffect } from 'react'
-import { providersApi, servicesApi, poolApi, type Provider, type Service, type ServiceCategory, type PoolCountry, type PoolStatusResult } from '../lib/api'
+import {
+  providersApi, servicesApi, poolApi,
+  type Provider, type Service, type ServiceCategory,
+  type PoolCountry, type BowerPosition, type PoolStatusResult,
+} from '../lib/api'
 
-type TabValue = 'all' | 'qualified' | 'blocked'
+// ─── 类型辅助 ─────────────────────────────────────────────────────────────────
 
 interface FlatService extends Service {
   categoryName: string
@@ -11,6 +15,278 @@ function flattenCategories(cats: ServiceCategory[]): FlatService[] {
   return cats.flatMap(cat => cat.services.map(s => ({ ...s, categoryName: cat.name })))
 }
 
+type TabValue = 'all' | 'qualified' | 'blocked'
+
+// ─── Rank 说明卡片 ────────────────────────────────────────────────────────────
+
+function RankLegend() {
+  return (
+    <div className="mb-6 bg-white rounded-xl border border-gray-200 p-4">
+      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">等级说明</p>
+      <div className="flex gap-4 flex-wrap">
+        {([
+          { rank: 'Gold',   label: '金牌', range: '交付率 ≥ 80%', color: 'bg-yellow-100 text-yellow-800 border-yellow-300' },
+          { rank: 'Silver', label: '银牌', range: '交付率 60–79%', color: 'bg-gray-100 text-gray-600 border-gray-300' },
+          { rank: 'Bronze', label: '铜牌', range: '交付率 < 60%',  color: 'bg-orange-100 text-orange-700 border-orange-300' },
+        ] as const).map(({ label, range, color }) => (
+          <div key={label} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm ${color}`}>
+            <span className="font-semibold">{label}</span>
+            <span className="text-xs opacity-80">{range}</span>
+          </div>
+        ))}
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-400">
+          <span className="font-medium">—</span>
+          <span className="text-xs">交付率未知（V3 降级）</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── SMSBower 视图 ────────────────────────────────────────────────────────────
+
+function BowerRankBadge({ rank }: { rank?: 'Gold' | 'Silver' | 'Bronze' }) {
+  if (!rank) return <span className="text-gray-400 text-xs">—</span>
+  const styles: Record<string, string> = {
+    Gold:   'bg-yellow-100 text-yellow-800 border-yellow-300',
+    Silver: 'bg-gray-100 text-gray-600 border-gray-300',
+    Bronze: 'bg-orange-100 text-orange-700 border-orange-300',
+  }
+  const labels: Record<string, string> = { Gold: '金牌', Silver: '银牌', Bronze: '铜牌' }
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-medium ${styles[rank]}`}>
+      {labels[rank]}
+    </span>
+  )
+}
+
+function BowerTable({ positions }: { positions: BowerPosition[] }) {
+  if (positions.length === 0) {
+    return (
+      <div className="bg-white rounded-xl border border-gray-200 py-16 text-center text-gray-400 text-sm">
+        暂无号池数据
+      </div>
+    )
+  }
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="bg-gray-50 border-b border-gray-200">
+            <th className="text-left px-5 py-3 font-medium text-gray-600">国家</th>
+            <th className="text-right px-5 py-3 font-medium text-gray-600">交付率</th>
+            <th className="text-left px-5 py-3 font-medium text-gray-600">等级</th>
+            <th className="text-left px-5 py-3 font-medium text-gray-600">供应商 ID</th>
+            <th className="text-right px-5 py-3 font-medium text-gray-600">库存</th>
+            <th className="text-right px-5 py-3 font-medium text-gray-600">价格</th>
+          </tr>
+        </thead>
+        <tbody>
+          {positions.map((pos, i) => (
+            <tr key={i} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+              <td className="px-5 py-3">
+                <div className="font-medium text-gray-900">{pos.name}</div>
+                <div className="text-xs text-gray-400 font-mono">{pos.shortName}</div>
+              </td>
+              <td className="px-5 py-3 text-right">
+                {(pos.successRate ?? 0) > 0 ? (
+                  <div className="flex items-center justify-end gap-2">
+                    <div className="w-16 bg-gray-100 rounded-full h-1.5">
+                      <div
+                        className={`h-1.5 rounded-full ${
+                          pos.successRate >= 80 ? 'bg-yellow-400' :
+                          pos.successRate >= 60 ? 'bg-gray-400' : 'bg-orange-400'
+                        }`}
+                        style={{ width: `${Math.min(pos.successRate ?? 0, 100)}%` }}
+                      />
+                    </div>
+                    <span className="text-gray-700 font-medium w-10 text-right tabular-nums">
+                      {pos.successRate}%
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-gray-400 text-xs">—</span>
+                )}
+              </td>
+              <td className="px-5 py-3">
+                <BowerRankBadge rank={pos.rank} />
+              </td>
+              <td className="px-5 py-3">
+                <div className="flex flex-wrap gap-1">
+                  {(pos.agentIds ?? []).map(id => (
+                    <span key={id} className="font-mono text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">
+                      {id}
+                    </span>
+                  ))}
+                </div>
+              </td>
+              <td className="px-5 py-3 text-right">
+                <StockBadge stock={pos.stock ?? 0} />
+              </td>
+              <td className="px-5 py-3 text-right font-mono text-gray-700">
+                ${(pos.price ?? 0).toFixed(2)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+// ─── SMSPool 视图（原有逻辑） ──────────────────────────────────────────────────
+
+function SmsPoolView({ result }: {
+  result: Extract<PoolStatusResult, { providerSlug: 'smspool' }>
+}) {
+  const [tab, setTab] = useState<TabValue>('all')
+
+  const displayCountries: PoolCountry[] = tab === 'qualified'
+    ? result.countries.filter(c => c.qualifies).sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999))
+    : tab === 'blocked'
+    ? result.countries.filter(c => c.blocked).sort((a, b) => a.shortName.localeCompare(b.shortName))
+    : [...result.countries].sort((a, b) => {
+        if (a.qualifies && !b.qualifies) return -1
+        if (!a.qualifies && b.qualifies) return 1
+        if (a.blocked && !b.blocked) return 1
+        if (!a.blocked && b.blocked) return -1
+        if (a.qualifies && b.qualifies) return (a.strategyRank ?? 999) - (b.strategyRank ?? 999)
+        if (a.blocked && b.blocked) return a.shortName.localeCompare(b.shortName)
+        return b.successRate - a.successRate
+      })
+
+  return (
+    <>
+      {/* 摘要卡片 */}
+      <div className="grid grid-cols-5 gap-4 mb-6">
+        <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
+          <div className="text-xs text-gray-500 mb-1">当前策略</div>
+          <div className="text-sm font-medium text-gray-900">
+            成功率 ≥ {result.service.successRateThreshold}%
+          </div>
+          <div className="text-sm font-medium text-gray-900">
+            价格 ≤ ${result.service.maxPrice.toFixed(2)}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
+          <div className="text-xs text-gray-500 mb-1">可用国家</div>
+          <div className="text-2xl font-semibold text-gray-900">{result.summary.total}</div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
+          <div className="text-xs text-gray-500 mb-1">符合策略</div>
+          <div className="text-2xl font-semibold text-green-600">{result.summary.qualified}</div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
+          <div className="text-xs text-gray-500 mb-1">已屏蔽</div>
+          <div className="text-2xl font-semibold text-orange-500">{result.summary.blocked}</div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
+          <div className="text-xs text-gray-500 mb-1">优选国家（前3）</div>
+          <div className="flex gap-1 mt-1 flex-wrap">
+            {result.summary.topPicks.length > 0
+              ? result.summary.topPicks.map((p, i) => (
+                  <span key={p} className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-medium">
+                    #{i + 1} {p}
+                  </span>
+                ))
+              : <span className="text-sm text-gray-400">无</span>
+            }
+          </div>
+        </div>
+      </div>
+
+      {/* Tab 切换 */}
+      <div className="flex gap-1 mb-4 bg-gray-100 rounded-lg p-1 w-fit">
+        {([
+          ['all',       `全部 (${result.summary.total})`],
+          ['qualified', `符合策略 (${result.summary.qualified})`],
+          ['blocked',   `已屏蔽 (${result.summary.blocked})`],
+        ] as [TabValue, string][]).map(([value, label]) => (
+          <button
+            key={value}
+            onClick={() => setTab(value)}
+            className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+              tab === value ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* 数据表格 */}
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-gray-50 border-b border-gray-200">
+              <th className="text-left px-5 py-3 font-medium text-gray-600">国家</th>
+              <th className="text-left px-5 py-3 font-medium text-gray-600">代码</th>
+              <th className="text-right px-5 py-3 font-medium text-gray-600">成功率</th>
+              <th className="text-right px-5 py-3 font-medium text-gray-600">最低价格</th>
+              <th className="text-right px-5 py-3 font-medium text-gray-600">库存</th>
+              <th className="text-left px-5 py-3 font-medium text-gray-600">策略状态</th>
+            </tr>
+          </thead>
+          <tbody>
+            {displayCountries.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="px-5 py-12 text-center text-gray-400">
+                  {tab === 'qualified' ? '当前没有符合策略的国家'
+                    : tab === 'blocked' ? '当前没有屏蔽的国家'
+                    : '暂无数据'}
+                </td>
+              </tr>
+            ) : (
+              displayCountries.map(country => (
+                <tr
+                  key={String(country.countryId)}
+                  className={`border-b border-gray-100 transition-colors ${
+                    country.blocked ? 'bg-orange-50 hover:bg-orange-100' : 'hover:bg-gray-50'
+                  }`}
+                >
+                  <td className="px-5 py-3 font-medium text-gray-900">{country.name}</td>
+                  <td className="px-5 py-3 font-mono text-gray-500">{country.shortName}</td>
+                  <td className="px-5 py-3 text-right">
+                    <SuccessRateBar
+                      value={country.successRate}
+                      threshold={result.service.successRateThreshold}
+                      dimmed={country.blocked}
+                    />
+                  </td>
+                  <td className="px-5 py-3 text-right font-mono text-gray-700">
+                    ${country.lowPrice.toFixed(2)}
+                  </td>
+                  <td className="px-5 py-3 text-right text-gray-700">
+                    <StockBadge stock={country.stock} />
+                  </td>
+                  <td className="px-5 py-3">
+                    <QualifyBadge
+                      blocked={country.blocked}
+                      qualifies={country.qualifies}
+                      strategyRank={country.strategyRank}
+                      successRate={country.successRate}
+                      lowPrice={country.lowPrice}
+                      threshold={result.service.successRateThreshold}
+                      maxPrice={result.service.maxPrice}
+                    />
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </>
+  )
+}
+
+// ─── PoolMonitor（主组件） ─────────────────────────────────────────────────────
+
 export default function PoolMonitor() {
   const [providers, setProviders] = useState<Provider[]>([])
   const [services, setServices] = useState<FlatService[]>([])
@@ -18,10 +294,9 @@ export default function PoolMonitor() {
   const [selectedServiceId, setSelectedServiceId] = useState('')
   const [result, setResult] = useState<PoolStatusResult | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const [error, setError] = useState('')
-  const [tab, setTab] = useState<TabValue>('all')
 
-  // 初始化：加载 providers 和 services
   useEffect(() => {
     async function init() {
       try {
@@ -45,7 +320,6 @@ export default function PoolMonitor() {
     init()
   }, [])
 
-  // 切换 Provider 时重置 Service 选择
   function handleProviderChange(providerId: string) {
     setSelectedProviderId(providerId)
     setResult(null)
@@ -54,46 +328,31 @@ export default function PoolMonitor() {
     setSelectedServiceId(firstService?.id ?? '')
   }
 
-  // 切换 Service 时清空结果
   function handleServiceChange(serviceId: string) {
     setSelectedServiceId(serviceId)
     setResult(null)
     setError('')
   }
 
-  async function fetchPoolStatus() {
+  async function fetchPoolStatus(refresh = false) {
     if (!selectedServiceId) return
-    setIsLoading(true)
+    refresh ? setIsRefreshing(true) : setIsLoading(true)
     setError('')
     try {
-      const data = await poolApi.status(selectedServiceId)
+      const data = await poolApi.status(selectedServiceId, refresh)
       setResult(data)
-      setTab('all')
     } catch (err) {
       setError(err instanceof Error ? err.message : '查询失败')
     } finally {
       setIsLoading(false)
+      setIsRefreshing(false)
     }
   }
 
   const filteredServices = services.filter(s => s.providerId === selectedProviderId)
-
-  const displayCountries: PoolCountry[] = result
-    ? tab === 'qualified'
-      ? result.countries.filter(c => c.qualifies).sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999))
-      : tab === 'blocked'
-      ? result.countries.filter(c => c.blocked).sort((a, b) => a.shortName.localeCompare(b.shortName))
-      : [...result.countries].sort((a, b) => {
-          // 排序：符合策略 → 不符合（按成功率） → 已屏蔽（按代码）
-          if (a.qualifies && !b.qualifies) return -1
-          if (!a.qualifies && b.qualifies) return 1
-          if (a.blocked && !b.blocked) return 1
-          if (!a.blocked && b.blocked) return -1
-          if (a.qualifies && b.qualifies) return (a.rank ?? 999) - (b.rank ?? 999)
-          if (a.blocked && b.blocked) return a.shortName.localeCompare(b.shortName)
-          return b.successRate - a.successRate
-        })
-    : []
+  const selectedProvider = providers.find(p => p.id === selectedProviderId)
+  const isBower = selectedProvider?.name?.toLowerCase().includes('smsbower')
+    || result?.providerSlug === 'smsbower'
 
   return (
     <div>
@@ -101,8 +360,11 @@ export default function PoolMonitor() {
         <h2 className="text-xl font-semibold text-gray-900">号池监控</h2>
       </div>
 
+      {/* Rank 说明（SMSBower 时显示） */}
+      {isBower && <RankLegend />}
+
       {/* 筛选栏 */}
-      <div className="flex items-center gap-3 mb-6">
+      <div className="flex items-center gap-3 mb-6 flex-wrap">
         <div className="flex items-center gap-2">
           <label className="text-sm font-medium text-gray-600 whitespace-nowrap">Provider</label>
           <select
@@ -133,12 +395,23 @@ export default function PoolMonitor() {
         </div>
 
         <button
-          onClick={fetchPoolStatus}
-          disabled={!selectedServiceId || isLoading}
+          onClick={() => fetchPoolStatus(false)}
+          disabled={!selectedServiceId || isLoading || isRefreshing}
           className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
         >
           {isLoading ? '查询中...' : '查询'}
         </button>
+
+        {/* 强制刷新（SMSBower 才有意义） */}
+        {result?.providerSlug === 'smsbower' && (
+          <button
+            onClick={() => fetchPoolStatus(true)}
+            disabled={isLoading || isRefreshing}
+            className="px-4 py-2 border border-gray-300 hover:bg-gray-50 disabled:opacity-50 text-gray-600 text-sm font-medium rounded-lg transition-colors"
+          >
+            {isRefreshing ? '刷新中...' : '强制刷新'}
+          </button>
+        )}
       </div>
 
       {error && (
@@ -147,132 +420,11 @@ export default function PoolMonitor() {
         </div>
       )}
 
+      {/* 结果展示 */}
       {result && (
-        <>
-          {/* 摘要卡片 */}
-          <div className="grid grid-cols-5 gap-4 mb-6">
-            <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
-              <div className="text-xs text-gray-500 mb-1">当前策略</div>
-              <div className="text-sm font-medium text-gray-900">
-                成功率 ≥ {result.service.successRateThreshold}%
-              </div>
-              <div className="text-sm font-medium text-gray-900">
-                价格 ≤ ${result.service.maxPrice.toFixed(2)}
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
-              <div className="text-xs text-gray-500 mb-1">可用国家</div>
-              <div className="text-2xl font-semibold text-gray-900">{result.summary.total}</div>
-            </div>
-
-            <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
-              <div className="text-xs text-gray-500 mb-1">符合策略</div>
-              <div className="text-2xl font-semibold text-green-600">{result.summary.qualified}</div>
-            </div>
-
-            <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
-              <div className="text-xs text-gray-500 mb-1">已屏蔽</div>
-              <div className="text-2xl font-semibold text-orange-500">{result.summary.blocked}</div>
-            </div>
-
-            <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
-              <div className="text-xs text-gray-500 mb-1">优选国家（前3）</div>
-              <div className="flex gap-1 mt-1 flex-wrap">
-                {result.summary.topPicks.length > 0
-                  ? result.summary.topPicks.map((p, i) => (
-                      <span key={p} className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-medium">
-                        #{i + 1} {p}
-                      </span>
-                    ))
-                  : <span className="text-sm text-gray-400">无</span>
-                }
-              </div>
-            </div>
-          </div>
-
-          {/* Tab 切换 */}
-          <div className="flex gap-1 mb-4 bg-gray-100 rounded-lg p-1 w-fit">
-            {([
-              ['all', `全部 (${result.summary.total})`],
-              ['qualified', `符合策略 (${result.summary.qualified})`],
-              ['blocked', `已屏蔽 (${result.summary.blocked})`],
-            ] as [TabValue, string][]).map(([value, label]) => (
-              <button
-                key={value}
-                onClick={() => setTab(value)}
-                className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                  tab === value
-                    ? 'bg-white text-gray-900 shadow-sm'
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
-          {/* 数据表格 */}
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-gray-50 border-b border-gray-200">
-                  <th className="text-left px-5 py-3 font-medium text-gray-600">国家</th>
-                  <th className="text-left px-5 py-3 font-medium text-gray-600">代码</th>
-                  <th className="text-right px-5 py-3 font-medium text-gray-600">成功率</th>
-                  <th className="text-right px-5 py-3 font-medium text-gray-600">最低价格</th>
-                  <th className="text-right px-5 py-3 font-medium text-gray-600">库存</th>
-                  <th className="text-left px-5 py-3 font-medium text-gray-600">策略状态</th>
-                </tr>
-              </thead>
-              <tbody>
-                {displayCountries.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="px-5 py-12 text-center text-gray-400">
-                      {tab === 'qualified' ? '当前没有符合策略的国家' : tab === 'blocked' ? '当前没有屏蔽的国家' : '暂无数据'}
-                    </td>
-                  </tr>
-                ) : (
-                  displayCountries.map(country => (
-                    <tr
-                      key={country.countryId}
-                      className={`border-b border-gray-100 transition-colors ${
-                        country.blocked ? 'bg-orange-50 hover:bg-orange-100' : 'hover:bg-gray-50'
-                      }`}
-                    >
-                      <td className="px-5 py-3 font-medium text-gray-900">{country.name}</td>
-                      <td className="px-5 py-3 font-mono text-gray-500">{country.shortName}</td>
-                      <td className="px-5 py-3 text-right">
-                        <SuccessRateBar
-                          value={country.successRate}
-                          threshold={result.service.successRateThreshold}
-                          dimmed={country.blocked}
-                        />
-                      </td>
-                      <td className="px-5 py-3 text-right font-mono text-gray-700">
-                        ${country.lowPrice.toFixed(2)}
-                      </td>
-                      <td className="px-5 py-3 text-right text-gray-700">
-                        <StockBadge stock={country.stock} />
-                      </td>
-                      <td className="px-5 py-3">
-                        <QualifyBadge
-                          blocked={country.blocked}
-                          qualifies={country.qualifies}
-                          rank={country.rank}
-                          successRate={country.successRate}
-                          lowPrice={country.lowPrice}
-                          threshold={result.service.successRateThreshold}
-                          maxPrice={result.service.maxPrice}
-                        />
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </>
+        result.providerSlug === 'smsbower'
+          ? <BowerTable positions={result.positions} />
+          : <SmsPoolView result={result} />
       )}
 
       {!result && !isLoading && !error && (
@@ -283,6 +435,8 @@ export default function PoolMonitor() {
     </div>
   )
 }
+
+// ─── 共用小组件 ───────────────────────────────────────────────────────────────
 
 function SuccessRateBar({ value, threshold, dimmed }: { value: number; threshold: number; dimmed: boolean }) {
   const passes = value >= threshold
@@ -308,15 +462,10 @@ function StockBadge({ stock }: { stock: number }) {
 }
 
 function QualifyBadge({
-  blocked, qualifies, rank, successRate, lowPrice, threshold, maxPrice
+  blocked, qualifies, strategyRank, successRate, lowPrice, threshold, maxPrice,
 }: {
-  blocked: boolean
-  qualifies: boolean
-  rank: number | null
-  successRate: number
-  lowPrice: number
-  threshold: number
-  maxPrice: number
+  blocked: boolean; qualifies: boolean; strategyRank: number | null
+  successRate: number; lowPrice: number; threshold: number; maxPrice: number
 }) {
   if (blocked) {
     return (
@@ -325,26 +474,23 @@ function QualifyBadge({
       </span>
     )
   }
-
   if (qualifies) {
     return (
       <div className="flex items-center gap-2">
         <span className="inline-flex items-center px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs font-medium">
           符合策略
         </span>
-        {rank !== null && rank <= 3 && (
+        {strategyRank !== null && strategyRank <= 3 && (
           <span className="inline-flex items-center px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-medium">
-            优选 #{rank}
+            优选 #{strategyRank}
           </span>
         )}
       </div>
     )
   }
-
   const reasons: string[] = []
   if (successRate < threshold) reasons.push(`成功率不足 (${successRate}% < ${threshold}%)`)
   if (lowPrice > maxPrice) reasons.push(`价格超限 ($${lowPrice.toFixed(2)} > $${maxPrice.toFixed(2)})`)
-
   return (
     <div className="flex items-center gap-1.5 flex-wrap">
       <span className="inline-flex items-center px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">

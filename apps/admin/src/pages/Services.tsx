@@ -62,6 +62,7 @@ interface ServiceFormState {
 }
 
 interface EditServiceState {
+  externalServiceId: string
   successRateThreshold: number
   maxPrice: number
   blockedCountries: string[]
@@ -201,6 +202,7 @@ export default function Services() {
   function startEditService(svc: Service) {
     setEditingServiceId(svc.id)
     setEditSvcState({
+      externalServiceId: svc.externalServiceId,
       successRateThreshold: svc.successRateThreshold,
       maxPrice: svc.maxPrice,
       blockedCountries: svc.blockedCountries ?? [],
@@ -506,25 +508,38 @@ export default function Services() {
                                   )}
                                 </td>
                               </tr>
-                              {/* 编辑时展开屏蔽国家和 isDefault */}
+                              {/* 编辑时展开：External Service ID / 屏蔽国家 / isDefault */}
                               {isEditing && (
                                 <tr key={`${svc.id}-edit`} className="border-b border-blue-100 bg-blue-50">
                                   <td colSpan={7} className="px-5 py-3">
-                                    <div className="flex items-start gap-6">
-                                      <div className="flex-1">
-                                        <label className="block text-xs font-medium text-gray-600 mb-1">屏蔽国家</label>
-                                        <TagInput
-                                          tags={editSvcState.blockedCountries}
-                                          onChange={v => setEditSvcState(s => ({ ...s, blockedCountries: v }))}
+                                    <div className="space-y-3">
+                                      <div>
+                                        <label className="block text-xs font-medium text-gray-600 mb-1">
+                                          外部 Service ID
+                                        </label>
+                                        <input
+                                          type="text"
+                                          value={editSvcState.externalServiceId}
+                                          onChange={e => setEditSvcState(s => ({ ...s, externalServiceId: e.target.value }))}
+                                          className="w-48 px-2 py-1 border border-gray-300 rounded text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
                                         />
                                       </div>
-                                      <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-700 mt-5">
-                                        <input type="checkbox" checked={editSvcState.isDefault}
-                                          onChange={e => setEditSvcState(s => ({ ...s, isDefault: e.target.checked }))}
-                                          className="w-4 h-4"
-                                        />
-                                        推荐运营商 ⭐
-                                      </label>
+                                      <div className="flex items-start gap-6">
+                                        <div className="flex-1">
+                                          <label className="block text-xs font-medium text-gray-600 mb-1">屏蔽国家</label>
+                                          <TagInput
+                                            tags={editSvcState.blockedCountries}
+                                            onChange={v => setEditSvcState(s => ({ ...s, blockedCountries: v }))}
+                                          />
+                                        </div>
+                                        <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-700 mt-5">
+                                          <input type="checkbox" checked={editSvcState.isDefault}
+                                            onChange={e => setEditSvcState(s => ({ ...s, isDefault: e.target.checked }))}
+                                            className="w-4 h-4"
+                                          />
+                                          推荐运营商 ⭐
+                                        </label>
+                                      </div>
                                     </div>
                                   </td>
                                 </tr>

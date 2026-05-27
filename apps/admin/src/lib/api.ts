@@ -105,6 +105,7 @@ export const servicesApi = {
     blockedCountries?: string[]
   }) => request<Service>('/api/services', { method: 'POST', body: JSON.stringify(data) }),
   update: (id: string, data: {
+    externalServiceId?: string
     successRateThreshold?: number
     maxPrice?: number
     blockedCountries?: string[]
@@ -115,6 +116,8 @@ export const servicesApi = {
 }
 
 // ---- Pool Monitor ----
+
+/** SMSPool 国家条目（含策略分析） */
 export interface PoolCountry {
   countryId: number | string
   name: string
@@ -125,29 +128,44 @@ export interface PoolCountry {
   stock: number
   blocked: boolean
   qualifies: boolean
-  rank: number | null
-}
-export interface PoolStatusResult {
-  service: {
-    id: string
-    name: string
-    providerName: string
-    successRateThreshold: number
-    maxPrice: number
-    blockedCountries: string[]
-  }
-  summary: {
-    total: number
-    qualified: number
-    blocked: number
-    topPicks: string[]
-  }
-  countries: PoolCountry[]
+  strategyRank: number | null   // SMSPool 策略排名（第 1/2/3 优先取号）
 }
 
+/** SMSBower 供应商 position 条目 */
+export interface BowerPosition {
+  countryId: number | string
+  name: string
+  shortName: string
+  price: number
+  lowPrice: number
+  successRate: number      // 交付率 0-100（内部 API 有；V3 降级时为 0）
+  stock: number
+  rank?: 'Gold' | 'Silver' | 'Bronze'
+  agentIds?: string[]
+}
+
+/** 统一响应结构（通过 providerSlug 区分） */
+export type PoolStatusResult =
+  | {
+      providerSlug: 'smspool'
+      service: {
+        id: string; name: string; providerName: string; providerSlug: string
+        successRateThreshold: number; maxPrice: number; blockedCountries: string[]
+      }
+      summary: { total: number; qualified: number; blocked: number; topPicks: string[] }
+      countries: PoolCountry[]
+    }
+  | {
+      providerSlug: 'smsbower'
+      service: { id: string; name: string; providerName: string; providerSlug: string }
+      positions: BowerPosition[]
+    }
+
 export const poolApi = {
-  status: (serviceId: string) =>
-    request<PoolStatusResult>(`/api/pool-status?serviceId=${encodeURIComponent(serviceId)}`),
+  status: (serviceId: string, refresh = false) =>
+    request<PoolStatusResult>(
+      `/api/pool-status?serviceId=${encodeURIComponent(serviceId)}${refresh ? '&refresh=true' : ''}`,
+    ),
 }
 
 // ---- CDKs ----
