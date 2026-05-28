@@ -522,7 +522,9 @@ function StepWaiting({ data, goTo }: StepProps) {
 }
 
 // ─── StepReceived ─────────────────────────────────────────────────────────────
-// 已收到短信：显示验证码 + 再发一条 + 完成
+// 已收到短信：显示验证码
+// canRetry=false：复制即完成（静默 finish），隐藏倒计时和完成按钮
+// canRetry=true ：保留倒计时 + 再发一条 + 完成
 
 function StepReceived({ data, goTo }: StepProps) {
   const { phone, service, sms, code, canRetry, orderId } = data
@@ -558,7 +560,13 @@ function StepReceived({ data, goTo }: StepProps) {
   function handleCopyCode() {
     navigator.clipboard.writeText(code ?? '').then(() => {
       setCodeCopied(true)
-      setTimeout(() => setCodeCopied(false), 2000)
+      if (!canRetry) {
+        // canRetry=false：复制即完成，静默调 finish 跳转 success
+        // finish 失败时倒计时兜底自动完成，不打断用户
+        handleFinish()
+      } else {
+        setTimeout(() => setCodeCopied(false), 2000)
+      }
     })
   }
 
@@ -650,8 +658,8 @@ function StepReceived({ data, goTo }: StepProps) {
         </div>
       </div>
 
-      {/* Countdown */}
-      {seconds > 0 && (
+      {/* Countdown — 仅 canRetry=true 时显示 */}
+      {canRetry && seconds > 0 && (
         <div className="flex items-center gap-3 bg-orange-50 border border-orange-200 rounded-lg px-4 py-3">
           <span className="text-orange-500 text-lg">🕐</span>
           <div className="flex-1">
@@ -671,9 +679,9 @@ function StepReceived({ data, goTo }: StepProps) {
         </div>
       )}
 
-      {/* Action buttons */}
-      <div className="flex gap-3 pt-2">
-        {canRetry && (
+      {/* Action buttons — 仅 canRetry=true 时显示 */}
+      {canRetry && (
+        <div className="flex gap-3 pt-2">
           <button
             onClick={handleRetry}
             disabled={isRetrying || isFinishing}
@@ -681,17 +689,15 @@ function StepReceived({ data, goTo }: StepProps) {
           >
             {isRetrying ? '请求中...' : '再发一条'}
           </button>
-        )}
-        <button
-          onClick={handleFinish}
-          disabled={isRetrying || isFinishing}
-          className={`py-3 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors ${
-            canRetry ? 'flex-1' : 'w-full'
-          }`}
-        >
-          {isFinishing ? '完成中...' : '完成'}
-        </button>
-      </div>
+          <button
+            onClick={handleFinish}
+            disabled={isRetrying || isFinishing}
+            className="flex-1 py-3 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
+          >
+            {isFinishing ? '完成中...' : '完成'}
+          </button>
+        </div>
+      )}
     </div>
   )
 }
