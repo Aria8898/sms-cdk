@@ -231,16 +231,28 @@ app.post('/validate', async (c) => {
     return c.json({ error: 'CDK 次数已用完' }, 400)
   }
 
-  // 检查是否有进行中的订单（pending 或 received）
-  const [activeRow] = await db
-    .select({ count: sql<number>`count(*)`.as('count') })
+  // 检查是否有进行中的订单（pending 或 received），且尚未过期
+  const now = new Date().toISOString()
+  const activeOrders = await db
+    .select({ id: orders.id, expiresAt: orders.expiresAt })
     .from(orders)
     .where(and(
       eq(orders.cdkId, row.id),
       or(eq(orders.status, 'pending'), eq(orders.status, 'received')),
     ))
 
-  if (activeRow.count > 0) {
+  // 过期的 order 自动设为 expired，不再阻拦
+  const expiredIds = activeOrders
+    .filter(o => o.expiresAt && o.expiresAt < now)
+    .map(o => o.id)
+  if (expiredIds.length > 0) {
+    await Promise.all(
+      expiredIds.map(id => db.update(orders).set({ status: 'expired' }).where(eq(orders.id, id))),
+    )
+  }
+
+  const stillActive = activeOrders.filter(o => !expiredIds.includes(o.id))
+  if (stillActive.length > 0) {
     return c.json({ error: 'CDK 正在使用中，请等待当前流程完成' }, 400)
   }
 
@@ -290,15 +302,26 @@ app.post('/order', async (c) => {
     return c.json({ error: 'CDK 次数已用完' }, 400)
   }
 
-  const [activeRow] = await db
-    .select({ count: sql<number>`count(*)`.as('count') })
+  const checkNow = new Date().toISOString()
+  const activeOrders2 = await db
+    .select({ id: orders.id, expiresAt: orders.expiresAt })
     .from(orders)
     .where(and(
       eq(orders.cdkId, body.cdkId),
       or(eq(orders.status, 'pending'), eq(orders.status, 'received')),
     ))
 
-  if (activeRow.count > 0) {
+  const expiredIds2 = activeOrders2
+    .filter(o => o.expiresAt && o.expiresAt < checkNow)
+    .map(o => o.id)
+  if (expiredIds2.length > 0) {
+    await Promise.all(
+      expiredIds2.map(id => db.update(orders).set({ status: 'expired' }).where(eq(orders.id, id))),
+    )
+  }
+
+  const stillActive2 = activeOrders2.filter(o => !expiredIds2.includes(o.id))
+  if (stillActive2.length > 0) {
     return c.json({ error: 'CDK 正在使用中，请等待当前流程完成' }, 400)
   }
 
