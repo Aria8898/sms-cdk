@@ -24,6 +24,8 @@ export const services = sqliteTable('services', {
   name: text('name').notNull(),
   shortName: text('short_name').notNull(),
   externalServiceId: text('external_service_id').notNull(),
+  /** SMSBower 专用：官方 getNumberV2 接口使用的服务代码（如 'oi'），与内部数字 ID 不同 */
+  smsbowerServiceCode: text('smsbower_service_code'),
   successRateThreshold: integer('success_rate_threshold').notNull().default(70),
   maxPrice: real('max_price').notNull().default(0.5),
   blockedCountries: text('blocked_countries').notNull().default('[]'),
@@ -61,4 +63,13 @@ export const poolStatusCache = sqliteTable('pool_status_cache', {
   serviceId: text('service_id').primaryKey(),
   data: text('data').notNull(),
   cachedAt: text('cached_at').notNull(),
+})
+
+// Step 6: 同一激活内的多条短信记录
+export const orderSms = sqliteTable('order_sms', {
+  id: text('id').primaryKey(),
+  orderId: text('order_id').notNull(),
+  smsContent: text('sms_content').notNull().default(''),
+  verificationCode: text('verification_code').notNull().default(''),
+  receivedAt: text('received_at').notNull(),
 })

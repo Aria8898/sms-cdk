@@ -39,6 +39,8 @@ export interface Service {
   categoryId: string
   isDefault: boolean
   externalServiceId: string
+  /** SMSBower 官方接口服务代码（如 'oi'），用于 getNumberV2；内部 API 仍用 externalServiceId */
+  smsbowerServiceCode?: string | null
   successRateThreshold: number
   maxPrice: number
   blockedCountries: string[]
@@ -51,9 +53,18 @@ export interface Cdk {
   totalUses: number; remainingUses: number; status: string
   hasPendingOrder: boolean; createdAt: string
 }
+export interface OrderSms {
+  id: string
+  orderId: string
+  smsContent: string
+  verificationCode: string
+  receivedAt: string
+}
+
 export interface Order {
   id: string; cdkId: string; phoneNumber: string | null; smsContent: string | null
   verificationCode: string | null; status: string; createdAt: string; completedAt: string | null
+  smsList?: OrderSms[]
 }
 export interface CdkDetail extends Cdk {
   service: Service; orders: Order[]
@@ -99,6 +110,7 @@ export const servicesApi = {
     categoryId: string
     providerId: string
     externalServiceId: string
+    smsbowerServiceCode?: string
     isDefault?: boolean
     successRateThreshold?: number
     maxPrice?: number
@@ -106,6 +118,7 @@ export const servicesApi = {
   }) => request<Service>('/api/services', { method: 'POST', body: JSON.stringify(data) }),
   update: (id: string, data: {
     externalServiceId?: string
+    smsbowerServiceCode?: string | null
     successRateThreshold?: number
     maxPrice?: number
     blockedCountries?: string[]

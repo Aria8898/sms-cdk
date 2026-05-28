@@ -70,30 +70,11 @@ function rateToRank(rate: number): 'Gold' | 'Silver' | 'Bronze' {
 }
 
 /**
- * 解析 activationTime 为剩余秒数（默认 1500 秒兜底）。
- * 格式待调试：可能是 ISO 日期字符串、Unix 时间戳（秒）或直接秒数。
+ * SMSBower activationTime 是激活创建时间，非到期时间，无法直接计算剩余秒数。
+ * 固定返回 20 分钟（SMSBower 标准激活窗口）。
  */
-function parseActivationTime(value: string | number | undefined): number {
-  if (value == null) return 1500
-  const num = typeof value === 'number' ? value : parseFloat(String(value))
-  if (!isNaN(num)) {
-    // Unix 时间戳（> 1e9）
-    if (num > 1_000_000_000) {
-      const remaining = Math.round((num * 1000 - Date.now()) / 1000)
-      return remaining > 0 ? remaining : 1500
-    }
-    // 直接秒数
-    return num > 0 ? num : 1500
-  }
-  // 尝试 ISO 日期字符串
-  try {
-    const ms = new Date(String(value)).getTime()
-    if (!isNaN(ms)) {
-      const remaining = Math.round((ms - Date.now()) / 1000)
-      return remaining > 0 ? remaining : 1500
-    }
-  } catch { /* ignore */ }
-  return 1500
+function parseActivationTime(_value: string | number | undefined): number {
+  return 1200  // 20 分钟
 }
 
 /**
@@ -112,10 +93,76 @@ function isoToSmsBowerKey(iso: string): string | null {
   return MAP[iso.toUpperCase()] ?? null
 }
 
+// ─── Official country list cache ──────────────────────────────────────────────
+
+interface OfficialCountry {
+  id: number
+  eng: string
+}
+
 // ─── SmsBowerAdapter ─────────────────────────────────────────────────────────
 
 export class SmsBowerAdapter implements SmsProvider {
   constructor(private apiKey: string) {}
+
+  /** 官方 country ID 缓存：ISO 码 → 官方数字 ID（如 'US' → 187） */
+  private _officialCountryCache: Map<string, number> | null = null
+
+  /**
+   * 获取 ISO → 官方 country ID 的映射。
+   * 内部 API 的 country.id（如 69）与官方 API 的 country code（如 187）是两套编号，
+   * 必须调用 getCountries 拿官方 ID，否则 getNumberV2 会报错。
+   */
+  private async _getOfficialCountryId(iso: string, titleFallback?: string): Promise<number | undefined> {
+    if (!this._officialCountryCache) {
+      try {
+        const res = await fetch(`${OFFICIAL_BASE}?api_key=${encodeURIComponent(this.apiKey)}&action=getCountries`)
+        const text = await res.text()
+        console.log(`[smsbower] getCountries status=${res.status} body(前300)=${text.slice(0, 300)}`)
+        const parsed = JSON.parse(text) as unknown
+        // 可能是数组，也可能是对象（{ id: { eng, rus, chn } } 格式）
+        this._officialCountryCache = new Map()
+        if (Array.isArray(parsed)) {
+          for (const c of parsed as OfficialCountry[]) {
+            if (c.eng) this._officialCountryCache.set(c.eng.toLowerCase(), c.id)
+          }
+        } else if (parsed && typeof parsed === 'object') {
+          // 对象格式：{ "1": { "eng": "Russia", ... }, "2": { ... } }
+          for (const [id, val] of Object.entries(parsed as Record<string, { eng?: string }>)) {
+            if (val?.eng) this._officialCountryCache.set(val.eng.toLowerCase(), Number(id))
+          }
+        }
+        console.log(`[smsbower] getCountries 缓存了 ${this._officialCountryCache.size} 个国家`)
+      } catch (err) {
+        console.warn('[smsbower] getCountries 失败，country 参数将不传:', err)
+        this._officialCountryCache = new Map()  // 空缓存，避免反复请求
+      }
+    }
+
+    // 优先用 ISO 精确匹配（getCountries 通常不含 ISO 字段，用英文名匹配）
+    const isoToEngName: Record<string, string> = {
+      US: 'united states', RU: 'russia', CN: 'china', GB: 'england',
+      DE: 'germany', FR: 'france', IN: 'india', BR: 'brazil',
+      JP: 'japan', KR: 'south korea', VN: 'vietnam', ID: 'indonesia',
+      PH: 'philippines', NG: 'nigeria', KE: 'kenya',
+      SG: 'singapore', MY: 'malaysia', CA: 'canada', AU: 'australia',
+      MX: 'mexico', UA: 'ukraine', PL: 'poland', TR: 'turkey',
+      TH: 'thailand', PK: 'pakistan', BD: 'bangladesh', EG: 'egypt',
+    }
+    const engName = isoToEngName[iso.toUpperCase()]
+    if (engName) {
+      const id = this._officialCountryCache.get(engName)
+      if (id !== undefined) return id
+    }
+
+    // 用内部 API 的 title 做模糊匹配兜底
+    if (titleFallback) {
+      const id = this._officialCountryCache.get(titleFallback.toLowerCase())
+      if (id !== undefined) return id
+    }
+
+    return undefined
+  }
 
   // ─── getPoolStatus ──────────────────────────────────────────────────────────
   // 优先用内部 getPricesByService（含等级/交付率），降级到官方 getPricesV3
@@ -171,9 +218,9 @@ export class SmsBowerAdapter implements SmsProvider {
             : desc === 'bronze' ? 'Bronze'
             : undefined
           result.push({
-            countryId: country.iso,
+            countryId: country.id,   // 内部 ID（非官方编号，仅用于过滤后回查 iso/title）
             name: country.title,
-            shortName: country.iso,
+            shortName: country.iso,  // ISO 码，用于过滤 + 查官方 country ID
             price: pos.price,
             lowPrice: pos.price,
             successRate: 0,
@@ -241,14 +288,36 @@ export class SmsBowerAdapter implements SmsProvider {
       console.error('[smsbower] getPoolStatus for orderNumber failed:', err)
     }
 
+    console.log(
+      `[smsbower] orderNumber service=${externalServiceId} countryCode=${options.countryCode ?? 'any'}` +
+      ` maxPrice=${options.maxPrice} totalPositions=${positions.length}` +
+      ` positionsSample=${JSON.stringify(positions.slice(0, 5).map(p => ({ shortName: p.shortName, stock: p.stock, price: p.price, rank: p.rank })))}`,
+    )
+
     // 若指定了国家，只取该国的供应商
+    // 注意：内部 API 返回的 shortName 是 ISO 码（如 'US'），官方 V3 返回的是 bowerKey（如 'usa'）
+    // 因此需要同时匹配两种格式
     if (options.countryCode) {
-      const bowerKey = isoToSmsBowerKey(options.countryCode)
-      const targeted = positions.filter(p =>
-        bowerKey
-          ? p.shortName.toLowerCase() === bowerKey
-          : p.shortName.toLowerCase() === options.countryCode!.toLowerCase(),
+      const isoUpper = options.countryCode.toUpperCase()
+      const bowerKey = isoToSmsBowerKey(isoUpper) // 'US' → 'usa'
+
+      console.log(
+        `[smsbower] 国家过滤: isoUpper=${isoUpper} bowerKey=${bowerKey}` +
+        ` 所有 shortName=[${[...new Set(positions.map(p => p.shortName))].join(', ')}]`,
       )
+
+      const targeted = positions.filter(p => {
+        const sn = p.shortName.toLowerCase()
+        // 同时匹配 ISO 码（内部 API：'us'）和 bowerKey（官方 V3：'usa'）
+        return sn === isoUpper.toLowerCase() || (bowerKey !== null && sn === bowerKey)
+      })
+
+      console.log(
+        `[smsbower] 过滤后: targeted=${targeted.length}` +
+        ` (有库存=${targeted.filter(p => p.stock > 0).length})` +
+        ` detail=${JSON.stringify(targeted.map(p => ({ shortName: p.shortName, stock: p.stock, price: p.price, rank: p.rank, agentIds: p.agentIds })))}`,
+      )
+
       if (targeted.length === 0) {
         throw new Error(`该 CDK 仅限 ${options.countryCode} 国家使用，但该国家暂无可用号码`)
       }
@@ -268,6 +337,13 @@ export class SmsBowerAdapter implements SmsProvider {
         return b.stock - a.stock
       })
 
+    console.log(
+      `[smsbower] 合格 positions（有库存且价格达标）: ${qualified.length}` +
+      ` maxPrice=${options.maxPrice}` +
+      ` 无库存排除=${positions.filter(p => p.stock === 0).length}` +
+      ` 超价排除=${positions.filter(p => p.stock > 0 && p.price > (options.maxPrice ?? Infinity)).length}`,
+    )
+
     // 取前 5 个供应商 ID
     const providerIds = [...new Set(qualified.flatMap(p => p.agentIds ?? []))].slice(0, 5)
     if (providerIds.length === 0 && positions.length > 0) {
@@ -275,12 +351,39 @@ export class SmsBowerAdapter implements SmsProvider {
       positions.slice(0, 3).forEach(p => (p.agentIds ?? []).forEach(id => providerIds.push(id)))
     }
 
+    // 官方 getNumberV2 要求服务代码（如 'oi'），而非内部数字 ID
+    const serviceCode = options.officialServiceCode ?? externalServiceId
+    if (!options.officialServiceCode) {
+      console.warn(
+        `[smsbower] officialServiceCode 未配置，将用 externalServiceId=${externalServiceId} 作为服务代码，` +
+        '如遇 WRONG_SERVICE 错误，请在 Admin → Service 管理中填写「官方服务代码」',
+      )
+    }
+
+    // 获取官方 country ID（官方 API 编号体系与内部 API 不同，需通过 getCountries 查）
+    // shortName 是 ISO 码（如 'US'），name 是英文名（如 'United States'）
+    let officialCountryId: number | undefined
+    if (options.countryCode) {
+      const iso = options.countryCode.toUpperCase()
+      const titleFallback = qualified[0]?.name ?? undefined
+      officialCountryId = await this._getOfficialCountryId(iso, titleFallback)
+      console.log(`[smsbower] 官方 country ID 查询: iso=${iso} title=${titleFallback} → officialId=${officialCountryId ?? '未找到，不传 country'}`)
+    }
+
     const params = new URLSearchParams({
       api_key: this.apiKey,
       action: 'getNumberV2',
-      service: externalServiceId,
+      service: serviceCode,
     })
+    if (officialCountryId !== undefined) params.set('country', String(officialCountryId))
     if (providerIds.length > 0) params.set('providerIds', providerIds.join(','))
+
+    // 打印完整请求 URL（api_key 脱敏）
+    const debugParams = new URLSearchParams(params)
+    debugParams.set('api_key', '***')
+    console.log(
+      `[smsbower] getNumberV2 完整请求: ${OFFICIAL_BASE}?${debugParams.toString()}`,
+    )
 
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), 15000)
@@ -293,6 +396,8 @@ export class SmsBowerAdapter implements SmsProvider {
 
     // getNumberV2 成功返回 JSON，失败返回纯文本错误码
     const rawText = await res.text()
+    console.log(`[smsbower] getNumberV2 status=${res.status} body=${rawText.slice(0, 300)}`)
+
     if (!res.ok || rawText.startsWith('BAD_') || rawText.startsWith('NO_') || rawText.startsWith('ERROR')) {
       throw new Error(`暂无可用号码：${rawText}`)
     }
@@ -308,6 +413,10 @@ export class SmsBowerAdapter implements SmsProvider {
     }
 
     const expiresIn = parseActivationTime(data.activationTime)
+    console.log(
+      `[smsbower] 取号成功 activationId=${data.activationId}` +
+      ` phoneNumber=${data.phoneNumber} activationTime=${data.activationTime} → expiresIn=${expiresIn}s`,
+    )
 
     return {
       orderId: String(data.activationId),

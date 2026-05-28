@@ -4,7 +4,7 @@ import type { PoolOption } from '../lib/api'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-type Step = 'input' | 'confirm' | 'waiting' | 'success' | 'timeout' | 'error'
+type Step = 'input' | 'confirm' | 'waiting' | 'received' | 'success' | 'timeout' | 'error'
 
 interface FlowData {
   cdk: string
@@ -21,6 +21,9 @@ interface FlowData {
   countryCode?: string
   pools?: PoolOption[]
   selectedServiceId?: string
+  canRetry?: boolean
+  /** waiting 步骤剩余秒数，切换到 received 时快照，保持倒计时连续 */
+  secondsLeft?: number
 }
 
 type GoTo = (nextStep: Step, patch?: Partial<FlowData>) => void
@@ -192,6 +195,7 @@ function StepConfirm({ data, goTo }: StepProps) {
         orderId: result.orderId,
         phone: result.phoneNumber,
         expiresIn: result.expiresIn,
+        secondsLeft: result.expiresIn,
       })
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : '取号失败，请重试')
@@ -337,8 +341,14 @@ function StepConfirm({ data, goTo }: StepProps) {
 function StepWaiting({ data, goTo }: StepProps) {
   const { phone, service, expiresIn } = data
   const [copied, setCopied] = useState(false)
-  const [seconds, setSeconds] = useState(expiresIn ?? 0)
+  const [seconds, setSeconds] = useState(data.secondsLeft ?? expiresIn ?? 0)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // 使用 ref 追踪当前秒数，供轮询回调读取
+  const secondsRef = useRef(seconds)
+
+  useEffect(() => {
+    secondsRef.current = seconds
+  }, [seconds])
 
   useEffect(() => {
     timerRef.current = setInterval(() => {
@@ -361,14 +371,25 @@ function StepWaiting({ data, goTo }: StepProps) {
     const interval = setInterval(async () => {
       try {
         const result = await cdkApi.pollOrder(data.orderId)
-        if (result.status === 'completed') {
+        if (result.status === 'received') {
           clearInterval(interval)
+          if (timerRef.current) clearInterval(timerRef.current)
+          goTo('received', {
+            sms: result.smsContent ?? '',
+            code: result.verificationCode ?? '',
+            canRetry: result.canRetry ?? false,
+            secondsLeft: secondsRef.current,
+          })
+        } else if (result.status === 'completed') {
+          clearInterval(interval)
+          if (timerRef.current) clearInterval(timerRef.current)
           goTo('success', {
             sms: result.smsContent ?? '',
             code: result.verificationCode ?? '',
           })
         } else if (result.status === 'expired' || result.status === 'cancelled') {
           clearInterval(interval)
+          if (timerRef.current) clearInterval(timerRef.current)
           goTo('timeout')
         }
         // pending: 继续等待
@@ -391,9 +412,11 @@ function StepWaiting({ data, goTo }: StepProps) {
 
   function handleSimulate() {
     if (timerRef.current) clearInterval(timerRef.current)
-    goTo('success', {
+    goTo('received', {
       sms: 'Your OpenAI verification code is 847291. Do not share it.',
       code: '847291',
+      canRetry: true,
+      secondsLeft: seconds,
     })
   }
 
@@ -498,22 +521,83 @@ function StepWaiting({ data, goTo }: StepProps) {
   )
 }
 
-// ─── StepSuccess ─────────────────────────────────────────────────────────────
+// ─── StepReceived ─────────────────────────────────────────────────────────────
+// 已收到短信：显示验证码 + 再发一条 + 完成
 
-function StepSuccess({ data, goTo }: StepProps) {
-  const { phone, service, sms, code } = data
-  const [copied, setCopied] = useState(false)
+function StepReceived({ data, goTo }: StepProps) {
+  const { phone, service, sms, code, canRetry, orderId } = data
+  const [codeCopied, setCodeCopied] = useState(false)
+  const [isRetrying, setIsRetrying] = useState(false)
+  const [isFinishing, setIsFinishing] = useState(false)
+  const [errorMsg, setErrorMsg] = useState('')
+  const [seconds, setSeconds] = useState(data.secondsLeft ?? 0)
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => {
+    if (seconds <= 0) return
+    timerRef.current = setInterval(() => {
+      setSeconds(prev => {
+        if (prev <= 1) {
+          clearInterval(timerRef.current!)
+          // 倒计时归零自动完成
+          handleFinish()
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current)
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function stopTimer() {
+    if (timerRef.current) clearInterval(timerRef.current)
+  }
 
   function handleCopyCode() {
     navigator.clipboard.writeText(code ?? '').then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+      setCodeCopied(true)
+      setTimeout(() => setCodeCopied(false), 2000)
     })
   }
 
+  async function handleRetry() {
+    if (!orderId) return
+    setIsRetrying(true)
+    setErrorMsg('')
+    stopTimer()
+    try {
+      await cdkApi.retryOrder(orderId)
+      // 回到 waiting 步骤继续轮询（倒计时从当前剩余秒数继续）
+      goTo('waiting', { secondsLeft: seconds })
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : '再发失败，请重试')
+      // 失败则重启倒计时
+      setIsRetrying(false)
+    }
+  }
+
+  async function handleFinish() {
+    if (!orderId) return
+    setIsFinishing(true)
+    setErrorMsg('')
+    stopTimer()
+    try {
+      await cdkApi.finishOrder(orderId)
+      goTo('success')
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : '完成失败，请重试')
+      setIsFinishing(false)
+    }
+  }
+
+  const minutes = Math.floor(seconds / 60)
+  const secs = seconds % 60
+
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-6">
-      {/* Success header */}
+      {/* Header */}
       <div className="flex flex-col items-center text-center py-2">
         <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center mb-3">
           <svg
@@ -526,8 +610,8 @@ function StepSuccess({ data, goTo }: StepProps) {
             <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
           </svg>
         </div>
-        <h2 className="text-xl font-semibold text-gray-900">短信已接收</h2>
-        <p className="text-sm text-gray-500 mt-1">{service} 验证码已成功获取</p>
+        <h2 className="text-xl font-semibold text-gray-900">已收到短信</h2>
+        <p className="text-sm text-gray-500 mt-1">{service} 验证码已接收</p>
       </div>
 
       {/* Phone */}
@@ -556,15 +640,133 @@ function StepSuccess({ data, goTo }: StepProps) {
           <button
             onClick={handleCopyCode}
             className={`flex-shrink-0 px-4 py-3 rounded-lg border text-sm font-medium transition-colors ${
-              copied
+              codeCopied
                 ? 'bg-green-50 border-green-300 text-green-600'
                 : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
             }`}
           >
-            {copied ? '已复制 ✓' : '复制验证码'}
+            {codeCopied ? '已复制 ✓' : '复制验证码'}
           </button>
         </div>
       </div>
+
+      {/* Countdown */}
+      {seconds > 0 && (
+        <div className="flex items-center gap-3 bg-orange-50 border border-orange-200 rounded-lg px-4 py-3">
+          <span className="text-orange-500 text-lg">🕐</span>
+          <div className="flex-1">
+            <p className="text-xs text-orange-600 font-medium">激活剩余时间</p>
+            <p className="text-lg font-mono font-bold text-orange-500 tabular-nums">
+              {pad(minutes)}:{pad(secs)}
+            </p>
+          </div>
+          <p className="text-xs text-orange-500">到期自动完成</p>
+        </div>
+      )}
+
+      {/* Error */}
+      {errorMsg && (
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+          <p className="text-sm text-red-600">{errorMsg}</p>
+        </div>
+      )}
+
+      {/* Action buttons */}
+      <div className="flex gap-3 pt-2">
+        {canRetry && (
+          <button
+            onClick={handleRetry}
+            disabled={isRetrying || isFinishing}
+            className="flex-1 py-3 rounded-lg border border-blue-300 text-blue-600 text-sm font-medium hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {isRetrying ? '请求中...' : '再发一条'}
+          </button>
+        )}
+        <button
+          onClick={handleFinish}
+          disabled={isRetrying || isFinishing}
+          className={`py-3 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors ${
+            canRetry ? 'flex-1' : 'w-full'
+          }`}
+        >
+          {isFinishing ? '完成中...' : '完成'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ─── StepSuccess ─────────────────────────────────────────────────────────────
+
+function StepSuccess({ data, goTo }: StepProps) {
+  const { phone, service, sms, code } = data
+  const [copied, setCopied] = useState(false)
+
+  function handleCopyCode() {
+    navigator.clipboard.writeText(code ?? '').then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-6">
+      {/* Success header */}
+      <div className="flex flex-col items-center text-center py-2">
+        <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center mb-3">
+          <svg
+            className="w-7 h-7 text-green-500"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2.5}
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+        <h2 className="text-xl font-semibold text-gray-900">兑换完成</h2>
+        <p className="text-sm text-gray-500 mt-1">{service} 验证码已成功获取</p>
+      </div>
+
+      {/* Phone */}
+      <div className="space-y-1">
+        <p className="text-xs text-gray-400 uppercase tracking-wide font-medium">接码号码</p>
+        <p className="text-sm font-mono text-gray-500">{phone}</p>
+      </div>
+
+      {/* SMS content */}
+      {sms && (
+        <div className="space-y-1.5">
+          <p className="text-xs text-gray-400 uppercase tracking-wide font-medium">短信内容</p>
+          <div className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3">
+            <p className="text-sm text-gray-700 leading-relaxed">{sms}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Verification code */}
+      {code && (
+        <div className="space-y-2">
+          <p className="text-xs text-gray-400 uppercase tracking-wide font-medium">验证码</p>
+          <div className="flex items-center gap-3">
+            <div className="flex-1 bg-blue-600 rounded-lg px-5 py-3 flex items-center justify-center">
+              <span className="text-3xl font-mono font-bold text-white tracking-[0.25em]">
+                {code}
+              </span>
+            </div>
+            <button
+              onClick={handleCopyCode}
+              className={`flex-shrink-0 px-4 py-3 rounded-lg border text-sm font-medium transition-colors ${
+                copied
+                  ? 'bg-green-50 border-green-300 text-green-600'
+                  : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              {copied ? '已复制 ✓' : '复制验证码'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Action */}
       <div className="pt-2">
@@ -716,12 +918,13 @@ export default function Home() {
 
   return (
     <>
-      {step === 'input'   && <StepInput   data={data} goTo={goTo} />}
-      {step === 'confirm' && <StepConfirm data={data} goTo={goTo} />}
-      {step === 'waiting' && <StepWaiting data={data} goTo={goTo} />}
-      {step === 'success' && <StepSuccess data={data} goTo={goTo} />}
-      {step === 'timeout' && <StepTimeout data={data} goTo={goTo} />}
-      {step === 'error'   && <StepError   data={data} goTo={goTo} />}
+      {step === 'input'    && <StepInput    data={data} goTo={goTo} />}
+      {step === 'confirm'  && <StepConfirm  data={data} goTo={goTo} />}
+      {step === 'waiting'  && <StepWaiting  data={data} goTo={goTo} />}
+      {step === 'received' && <StepReceived data={data} goTo={goTo} />}
+      {step === 'success'  && <StepSuccess  data={data} goTo={goTo} />}
+      {step === 'timeout'  && <StepTimeout  data={data} goTo={goTo} />}
+      {step === 'error'    && <StepError    data={data} goTo={goTo} />}
     </>
   )
 }

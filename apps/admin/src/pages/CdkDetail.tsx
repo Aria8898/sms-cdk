@@ -1,6 +1,6 @@
 import { useNavigate, useParams } from 'react-router-dom'
 import { useState, useEffect } from 'react'
-import { cdksApi, type CdkDetail as CdkDetailType, type Order } from '../lib/api'
+import { cdksApi, type CdkDetail as CdkDetailType, type Order, type OrderSms } from '../lib/api'
 
 function StatusBadge({ status }: { status: string }) {
   if (status === 'active') {
@@ -53,10 +53,48 @@ function ResultBadge({ status }: { status: string }) {
       </span>
     )
   }
+  if (status === 'received') {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
+        已收到
+      </span>
+    )
+  }
   return (
     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">
       取消
     </span>
+  )
+}
+
+/** 展示单条订单的 SMS 历史列表（多条时展开） */
+function SmsList({ smsList }: { smsList: OrderSms[] }) {
+  if (!smsList || smsList.length === 0) return null
+
+  return (
+    <div className="mt-2 ml-4 space-y-1.5">
+      {smsList.map((item, idx) => (
+        <div
+          key={item.id}
+          className="flex items-start gap-3 bg-purple-50 border border-purple-100 rounded-md px-3 py-2 text-xs"
+        >
+          <span className="text-purple-400 font-medium flex-shrink-0 mt-0.5">
+            #{idx + 1}
+          </span>
+          <div className="flex-1 min-w-0 space-y-0.5">
+            <p className="text-gray-600 truncate" title={item.smsContent}>
+              {item.smsContent || <span className="text-gray-300">无内容</span>}
+            </p>
+            {item.verificationCode && (
+              <p className="text-purple-700 font-mono font-semibold">
+                验证码：{item.verificationCode}
+              </p>
+            )}
+          </div>
+          <span className="flex-shrink-0 text-gray-400 whitespace-nowrap">{item.receivedAt}</span>
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -171,30 +209,43 @@ export default function CdkDetail() {
               </tr>
             ) : (
               orders.map((order: Order) => (
-                <tr key={order.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                  <td className="px-5 py-3 text-gray-600 whitespace-nowrap">{order.createdAt}</td>
-                  <td className="px-5 py-3 text-gray-600 font-mono whitespace-nowrap">
-                    {order.phoneNumber ?? <span className="text-gray-300">—</span>}
-                  </td>
-                  <td className="px-5 py-3 text-gray-600 max-w-xs">
-                    {order.smsContent ? (
-                      <span className="block truncate" title={order.smsContent}>
-                        {order.smsContent}
-                      </span>
-                    ) : (
-                      <span className="text-gray-300">—</span>
-                    )}
-                  </td>
-                  <td className="px-5 py-3 font-mono text-gray-800">
-                    {order.verificationCode ?? <span className="text-gray-300">—</span>}
-                  </td>
-                  <td className="px-5 py-3">
-                    <ResultBadge status={order.status} />
-                  </td>
-                  <td className="px-5 py-3 text-gray-600 whitespace-nowrap">
-                    {order.completedAt ?? <span className="text-gray-300">—</span>}
-                  </td>
-                </tr>
+                <>
+                  <tr key={order.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                    <td className="px-5 py-3 text-gray-600 whitespace-nowrap">{order.createdAt}</td>
+                    <td className="px-5 py-3 text-gray-600 font-mono whitespace-nowrap">
+                      {order.phoneNumber ?? <span className="text-gray-300">—</span>}
+                    </td>
+                    <td className="px-5 py-3 text-gray-600 max-w-xs">
+                      {order.smsContent ? (
+                        <span className="block truncate" title={order.smsContent}>
+                          {order.smsContent}
+                        </span>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
+                    </td>
+                    <td className="px-5 py-3 font-mono text-gray-800">
+                      {order.verificationCode ?? <span className="text-gray-300">—</span>}
+                    </td>
+                    <td className="px-5 py-3">
+                      <ResultBadge status={order.status} />
+                    </td>
+                    <td className="px-5 py-3 text-gray-600 whitespace-nowrap">
+                      {order.completedAt ?? <span className="text-gray-300">—</span>}
+                    </td>
+                  </tr>
+                  {/* 多条短信历史（SMSBower received 流程） */}
+                  {order.smsList && order.smsList.length > 0 && (
+                    <tr key={`${order.id}-sms`} className="border-b border-gray-100 bg-purple-50/40">
+                      <td colSpan={6} className="px-5 py-2">
+                        <p className="text-xs text-purple-500 font-medium mb-1">
+                          短信记录（{order.smsList.length} 条）
+                        </p>
+                        <SmsList smsList={order.smsList} />
+                      </td>
+                    </tr>
+                  )}
+                </>
               ))
             )}
           </tbody>

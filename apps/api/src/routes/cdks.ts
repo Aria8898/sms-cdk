@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { eq, sql, and } from 'drizzle-orm'
-import { getDb, cdks, services, serviceCategories, orders } from '../db'
+import { getDb, cdks, services, serviceCategories, orders, orderSms } from '../db'
 import { authMiddleware } from '../middleware/auth'
 import type { Bindings } from '../types'
 
@@ -153,7 +153,19 @@ app.get('/:id', async (c) => {
 
   const cdkOrders = await db.select().from(orders).where(eq(orders.cdkId, id))
 
-  return c.json({ ...cdk, service, orders: cdkOrders })
+  // 为每条订单附加其 order_sms 记录
+  const ordersWithSms = await Promise.all(
+    cdkOrders.map(async (order) => {
+      const smsList = await db
+        .select()
+        .from(orderSms)
+        .where(eq(orderSms.orderId, order.id))
+        .orderBy(orderSms.receivedAt)
+      return { ...order, smsList }
+    }),
+  )
+
+  return c.json({ ...cdk, service, orders: ordersWithSms })
 })
 
 app.patch('/:id/disable', async (c) => {

@@ -55,6 +55,7 @@ interface ServiceFormState {
   categoryId: string
   providerId: string
   externalServiceId: string
+  smsbowerServiceCode: string
   isDefault: boolean
   successRateThreshold: number
   maxPrice: number
@@ -63,6 +64,7 @@ interface ServiceFormState {
 
 interface EditServiceState {
   externalServiceId: string
+  smsbowerServiceCode: string
   successRateThreshold: number
   maxPrice: number
   blockedCountries: string[]
@@ -89,13 +91,14 @@ export default function Services() {
   // 新增 service 表单（按 category）
   const [showServiceFormForCat, setShowServiceFormForCat] = useState<string | null>(null)
   const [svcForm, setSvcForm] = useState<ServiceFormState>({
-    categoryId: '', providerId: '', externalServiceId: '',
+    categoryId: '', providerId: '', externalServiceId: '', smsbowerServiceCode: '',
     isDefault: false, successRateThreshold: 70, maxPrice: 0.5, blockedCountries: [],
   })
 
   // 编辑 service
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null)
   const [editSvcState, setEditSvcState] = useState<EditServiceState>({
+    externalServiceId: '', smsbowerServiceCode: '',
     successRateThreshold: 70, maxPrice: 0.5, blockedCountries: [], isDefault: false,
   })
 
@@ -181,6 +184,7 @@ export default function Services() {
       categoryId: catId,
       providerId: providers[0]?.id ?? '',
       externalServiceId: '',
+      smsbowerServiceCode: '',
       isDefault: false,
       successRateThreshold: 70,
       maxPrice: 0.5,
@@ -191,7 +195,10 @@ export default function Services() {
   async function handleAddService() {
     if (!svcForm.externalServiceId.trim()) { alert('外部 Service ID 为必填项'); return }
     try {
-      await servicesApi.create(svcForm)
+      await servicesApi.create({
+        ...svcForm,
+        smsbowerServiceCode: svcForm.smsbowerServiceCode.trim() || undefined,
+      })
       setShowServiceFormForCat(null)
       await loadData()
     } catch (err) {
@@ -203,6 +210,7 @@ export default function Services() {
     setEditingServiceId(svc.id)
     setEditSvcState({
       externalServiceId: svc.externalServiceId,
+      smsbowerServiceCode: svc.smsbowerServiceCode ?? '',
       successRateThreshold: svc.successRateThreshold,
       maxPrice: svc.maxPrice,
       blockedCountries: svc.blockedCountries ?? [],
@@ -212,7 +220,10 @@ export default function Services() {
 
   async function saveEditService(id: string) {
     try {
-      await servicesApi.update(id, editSvcState)
+      await servicesApi.update(id, {
+        ...editSvcState,
+        smsbowerServiceCode: editSvcState.smsbowerServiceCode.trim() || null,
+      })
       setEditingServiceId(null)
       await loadData()
     } catch (err) {
@@ -378,8 +389,19 @@ export default function Services() {
                         <label className="block text-xs font-medium text-gray-600 mb-1">外部 Service ID <span className="text-red-500">*</span></label>
                         <input type="text" value={svcForm.externalServiceId}
                           onChange={e => setSvcForm(s => ({ ...s, externalServiceId: e.target.value }))}
-                          placeholder="例如：395"
+                          placeholder="例如：247（内部数字 ID）"
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">
+                          官方服务代码
+                          <span className="ml-1 text-gray-400 font-normal">（SMSBower 取号用，如 <code className="bg-gray-100 px-1 rounded">oi</code>）</span>
+                        </label>
+                        <input type="text" value={svcForm.smsbowerServiceCode}
+                          onChange={e => setSvcForm(s => ({ ...s, smsbowerServiceCode: e.target.value }))}
+                          placeholder="例如：oi（留空则沿用 Service ID）"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
                         />
                       </div>
                       <div>
@@ -434,7 +456,7 @@ export default function Services() {
                       <thead>
                         <tr className="border-b border-gray-100">
                           <th className="text-left px-5 py-2.5 font-medium text-gray-500 text-xs">运营商</th>
-                          <th className="text-left px-4 py-2.5 font-medium text-gray-500 text-xs">Service ID</th>
+                          <th className="text-left px-4 py-2.5 font-medium text-gray-500 text-xs">内部 ID / 官方代码</th>
                           <th className="text-left px-4 py-2.5 font-medium text-gray-500 text-xs">成功率阈值</th>
                           <th className="text-left px-4 py-2.5 font-medium text-gray-500 text-xs">最高单价</th>
                           <th className="text-left px-4 py-2.5 font-medium text-gray-500 text-xs">屏蔽国家</th>
@@ -457,7 +479,17 @@ export default function Services() {
                                     )}
                                   </div>
                                 </td>
-                                <td className="px-4 py-3 font-mono text-gray-600 text-xs">{svc.externalServiceId}</td>
+                                <td className="px-4 py-3 text-xs">
+                                  <span className="font-mono text-gray-600">{svc.externalServiceId}</span>
+                                  {svc.smsbowerServiceCode && (
+                                    <span className="ml-1 px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded font-mono">
+                                      {svc.smsbowerServiceCode}
+                                    </span>
+                                  )}
+                                  {!svc.smsbowerServiceCode && svc.providerName?.toLowerCase().includes('smsbower') && (
+                                    <span className="ml-1 text-orange-400" title="SMSBower 官方服务代码未配置，取号可能报 WRONG_SERVICE">⚠️</span>
+                                  )}
+                                </td>
                                 <td className="px-4 py-3">
                                   {isEditing ? (
                                     <input type="number" value={editSvcState.successRateThreshold} min={0} max={100}
@@ -513,16 +545,32 @@ export default function Services() {
                                 <tr key={`${svc.id}-edit`} className="border-b border-blue-100 bg-blue-50">
                                   <td colSpan={7} className="px-5 py-3">
                                     <div className="space-y-3">
-                                      <div>
-                                        <label className="block text-xs font-medium text-gray-600 mb-1">
-                                          外部 Service ID
-                                        </label>
-                                        <input
-                                          type="text"
-                                          value={editSvcState.externalServiceId}
-                                          onChange={e => setEditSvcState(s => ({ ...s, externalServiceId: e.target.value }))}
-                                          className="w-48 px-2 py-1 border border-gray-300 rounded text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                        />
+                                      <div className="flex gap-4">
+                                        <div>
+                                          <label className="block text-xs font-medium text-gray-600 mb-1">
+                                            外部 Service ID
+                                          </label>
+                                          <input
+                                            type="text"
+                                            value={editSvcState.externalServiceId}
+                                            onChange={e => setEditSvcState(s => ({ ...s, externalServiceId: e.target.value }))}
+                                            placeholder="内部数字 ID，如 247"
+                                            className="w-40 px-2 py-1 border border-gray-300 rounded text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                          />
+                                        </div>
+                                        <div>
+                                          <label className="block text-xs font-medium text-gray-600 mb-1">
+                                            官方服务代码
+                                            <span className="ml-1 text-gray-400 font-normal">（SMSBower 取号，如 <code className="bg-gray-100 px-1 rounded">oi</code>）</span>
+                                          </label>
+                                          <input
+                                            type="text"
+                                            value={editSvcState.smsbowerServiceCode}
+                                            onChange={e => setEditSvcState(s => ({ ...s, smsbowerServiceCode: e.target.value }))}
+                                            placeholder="留空则沿用 Service ID"
+                                            className="w-40 px-2 py-1 border border-gray-300 rounded text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                          />
+                                        </div>
                                       </div>
                                       <div className="flex items-start gap-6">
                                         <div className="flex-1">

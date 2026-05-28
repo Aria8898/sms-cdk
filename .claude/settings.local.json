@@ -3,7 +3,9 @@
     "allow": [
       "Bash(pnpm install *)",
       "Bash(grep -E \"^d|\\\\.ts$|\\\\.tsx$|\\\\.sql$\")",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(node_modules/.bin/tsc --noEmit -p apps/api/tsconfig.json)",
+      "Bash(node_modules/.bin/tsc --noEmit)"
     ]
   }
 }

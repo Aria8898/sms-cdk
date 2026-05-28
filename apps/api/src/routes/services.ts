@@ -24,6 +24,7 @@ app.get('/', async (c) => {
         categoryId: services.categoryId,
         isDefault: services.isDefault,
         externalServiceId: services.externalServiceId,
+        smsbowerServiceCode: services.smsbowerServiceCode,
         successRateThreshold: services.successRateThreshold,
         maxPrice: services.maxPrice,
         blockedCountries: services.blockedCountries,
@@ -56,6 +57,7 @@ app.post('/', async (c) => {
     categoryId: string
     providerId: string
     externalServiceId: string
+    smsbowerServiceCode?: string
     isDefault?: boolean
     successRateThreshold?: number
     maxPrice?: number
@@ -90,6 +92,7 @@ app.post('/', async (c) => {
     name: cat.name,           // copied from category for CDK code generation fallback
     shortName: cat.shortName,
     externalServiceId: body.externalServiceId.trim(),
+    smsbowerServiceCode: body.smsbowerServiceCode?.trim() || null,
     successRateThreshold: body.successRateThreshold ?? 70,
     maxPrice: body.maxPrice ?? 0.5,
     blockedCountries: JSON.stringify(body.blockedCountries ?? []),
@@ -108,6 +111,7 @@ app.put('/:id', async (c) => {
   const id = c.req.param('id')
   const body = await c.req.json<{
     externalServiceId?: string
+    smsbowerServiceCode?: string | null
     successRateThreshold?: number
     maxPrice?: number
     blockedCountries?: string[]
@@ -129,12 +133,14 @@ app.put('/:id', async (c) => {
 
   const updates: Partial<{
     externalServiceId: string
+    smsbowerServiceCode: string | null
     successRateThreshold: number
     maxPrice: number
     blockedCountries: string
     isDefault: boolean
   }> = {}
   if (body.externalServiceId?.trim()) updates.externalServiceId = body.externalServiceId.trim()
+  if ('smsbowerServiceCode' in body) updates.smsbowerServiceCode = body.smsbowerServiceCode?.trim() || null
   if (body.successRateThreshold !== undefined) updates.successRateThreshold = body.successRateThreshold
   if (body.maxPrice !== undefined) updates.maxPrice = body.maxPrice
   if (body.blockedCountries !== undefined) updates.blockedCountries = JSON.stringify(body.blockedCountries)

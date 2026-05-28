@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { eq, and, sql } from 'drizzle-orm'
+import { eq, and, sql, or } from 'drizzle-orm'
 import {
   getDb,
   cdks,
@@ -8,6 +8,7 @@ import {
   providers,
   serviceCategories,
   poolStatusCache,
+  orderSms,
 } from '../db'
 import { getProvider, getApiKey } from '../adapters'
 import type { PoolCountryStatus } from '../adapters/types'
@@ -148,6 +149,54 @@ async function getServiceMetas(
   return legacy ? [{ ...legacy, isDefault: true } as ServiceMeta] : []
 }
 
+// ─── 公共：解析订单对应的 providerSlug ───────────────────────────────────────
+
+async function resolveProviderSlug(
+  db: ReturnType<typeof getDb>,
+  order: { id: string; serviceId: string | null; cdkId: string },
+): Promise<string | null> {
+  if (order.serviceId) {
+    const [svcRow] = await db
+      .select({ slug: providers.slug })
+      .from(services)
+      .leftJoin(providers, eq(providers.id, services.providerId))
+      .where(eq(services.id, order.serviceId))
+    if (svcRow?.slug) return svcRow.slug
+  }
+
+  const [cdkMeta] = await db
+    .select({ categoryId: cdks.categoryId, serviceId: cdks.serviceId })
+    .from(cdks)
+    .where(eq(cdks.id, order.cdkId))
+
+  if (!cdkMeta) return null
+
+  if (cdkMeta.categoryId) {
+    const [svcRow] = await db
+      .select({ slug: providers.slug })
+      .from(services)
+      .leftJoin(providers, eq(providers.id, services.providerId))
+      .where(and(eq(services.categoryId, cdkMeta.categoryId), eq(services.isDefault, true)))
+      .limit(1)
+    if (svcRow?.slug) return svcRow.slug
+
+    const [fallback] = await db
+      .select({ slug: providers.slug })
+      .from(services)
+      .leftJoin(providers, eq(providers.id, services.providerId))
+      .where(eq(services.categoryId, cdkMeta.categoryId))
+      .limit(1)
+    return fallback?.slug ?? null
+  }
+
+  const [legacyRow] = await db
+    .select({ slug: providers.slug })
+    .from(services)
+    .leftJoin(providers, eq(providers.id, services.providerId))
+    .where(eq(services.id, cdkMeta.serviceId))
+  return legacyRow?.slug ?? null
+}
+
 // ─── POST /api/cdk/validate ───────────────────────────────────────────────────
 
 app.post('/validate', async (c) => {
@@ -182,13 +231,16 @@ app.post('/validate', async (c) => {
     return c.json({ error: 'CDK 次数已用完' }, 400)
   }
 
-  // 检查是否有 pending 订单
-  const [pendingRow] = await db
+  // 检查是否有进行中的订单（pending 或 received）
+  const [activeRow] = await db
     .select({ count: sql<number>`count(*)`.as('count') })
     .from(orders)
-    .where(and(eq(orders.cdkId, row.id), eq(orders.status, 'pending')))
+    .where(and(
+      eq(orders.cdkId, row.id),
+      or(eq(orders.status, 'pending'), eq(orders.status, 'received')),
+    ))
 
-  if (pendingRow.count > 0) {
+  if (activeRow.count > 0) {
     return c.json({ error: 'CDK 正在使用中，请等待当前流程完成' }, 400)
   }
 
@@ -238,12 +290,15 @@ app.post('/order', async (c) => {
     return c.json({ error: 'CDK 次数已用完' }, 400)
   }
 
-  const [pendingRow] = await db
+  const [activeRow] = await db
     .select({ count: sql<number>`count(*)`.as('count') })
     .from(orders)
-    .where(and(eq(orders.cdkId, body.cdkId), eq(orders.status, 'pending')))
+    .where(and(
+      eq(orders.cdkId, body.cdkId),
+      or(eq(orders.status, 'pending'), eq(orders.status, 'received')),
+    ))
 
-  if (pendingRow.count > 0) {
+  if (activeRow.count > 0) {
     return c.json({ error: 'CDK 正在使用中，请等待当前流程完成' }, 400)
   }
 
@@ -251,6 +306,7 @@ app.post('/order', async (c) => {
   type ServiceRow = {
     id: string
     externalServiceId: string | null
+    smsbowerServiceCode: string | null
     maxPrice: number | null
     successRateThreshold: number | null
     blockedCountries: string | null
@@ -271,6 +327,7 @@ app.post('/order', async (c) => {
       .select({
         id: services.id,
         externalServiceId: services.externalServiceId,
+        smsbowerServiceCode: services.smsbowerServiceCode,
         maxPrice: services.maxPrice,
         successRateThreshold: services.successRateThreshold,
         blockedCountries: services.blockedCountries,
@@ -286,6 +343,7 @@ app.post('/order', async (c) => {
       .select({
         id: services.id,
         externalServiceId: services.externalServiceId,
+        smsbowerServiceCode: services.smsbowerServiceCode,
         maxPrice: services.maxPrice,
         successRateThreshold: services.successRateThreshold,
         blockedCountries: services.blockedCountries,
@@ -300,6 +358,7 @@ app.post('/order', async (c) => {
         .select({
           id: services.id,
           externalServiceId: services.externalServiceId,
+          smsbowerServiceCode: services.smsbowerServiceCode,
           maxPrice: services.maxPrice,
           successRateThreshold: services.successRateThreshold,
           blockedCountries: services.blockedCountries,
@@ -319,6 +378,7 @@ app.post('/order', async (c) => {
       .select({
         id: services.id,
         externalServiceId: services.externalServiceId,
+        smsbowerServiceCode: services.smsbowerServiceCode,
         maxPrice: services.maxPrice,
         successRateThreshold: services.successRateThreshold,
         blockedCountries: services.blockedCountries,
@@ -355,6 +415,7 @@ app.post('/order', async (c) => {
       successRateThreshold: serviceRow.successRateThreshold!,
       blockedCountries: JSON.parse(serviceRow.blockedCountries ?? '[]') as string[],
       countryCode: cdkRow.countryCode ?? undefined,
+      officialServiceCode: serviceRow.smsbowerServiceCode ?? undefined,
     })
 
     const expiresAt = new Date(Date.now() + result.expiresIn * 1000).toISOString()
@@ -403,60 +464,29 @@ app.get('/order/:orderId/status', async (c) => {
     return c.json({ status: order.status })
   }
 
+  // 已处于 received 状态：返回最新一条 order_sms 给前端（无需再轮询上游）
+  if (order.status === 'received') {
+    const [cdkRow] = await db.select({ remainingUses: cdks.remainingUses }).from(cdks).where(eq(cdks.id, order.cdkId))
+    const [latestSms] = await db
+      .select()
+      .from(orderSms)
+      .where(eq(orderSms.orderId, orderId))
+      .orderBy(sql`${orderSms.receivedAt} DESC`)
+      .limit(1)
+
+    return c.json({
+      status: 'received',
+      smsContent: latestSms?.smsContent ?? order.smsContent ?? '',
+      verificationCode: latestSms?.verificationCode ?? order.verificationCode ?? '',
+      canRetry: (cdkRow?.remainingUses ?? 0) > 0,
+    })
+  }
+
   if (!order.externalOrderId) {
     return c.json({ status: 'pending', timeLeft: null })
   }
 
-  // 优先用订单上记录的 service_id；否则回落到 CDK category 的 default service
-  let providerSlug: string | null = null
-
-  if (order.serviceId) {
-    const [svcRow] = await db
-      .select({ slug: providers.slug })
-      .from(services)
-      .leftJoin(providers, eq(providers.id, services.providerId))
-      .where(eq(services.id, order.serviceId))
-    providerSlug = svcRow?.slug ?? null
-  }
-
-  if (!providerSlug) {
-    const [cdkMeta] = await db
-      .select({ categoryId: cdks.categoryId, serviceId: cdks.serviceId })
-      .from(cdks)
-      .where(eq(cdks.id, order.cdkId))
-
-    if (!cdkMeta) {
-      return c.json({ error: '无法确定服务提供商' }, 500)
-    }
-
-    if (cdkMeta.categoryId) {
-      const [svcRow] = await db
-        .select({ slug: providers.slug })
-        .from(services)
-        .leftJoin(providers, eq(providers.id, services.providerId))
-        .where(and(eq(services.categoryId, cdkMeta.categoryId), eq(services.isDefault, true)))
-        .limit(1)
-      providerSlug = svcRow?.slug ?? null
-
-      if (!providerSlug) {
-        const [fallback] = await db
-          .select({ slug: providers.slug })
-          .from(services)
-          .leftJoin(providers, eq(providers.id, services.providerId))
-          .where(eq(services.categoryId, cdkMeta.categoryId))
-          .limit(1)
-        providerSlug = fallback?.slug ?? null
-      }
-    } else {
-      const [legacyRow] = await db
-        .select({ slug: providers.slug })
-        .from(services)
-        .leftJoin(providers, eq(providers.id, services.providerId))
-        .where(eq(services.id, cdkMeta.serviceId))
-      providerSlug = legacyRow?.slug ?? null
-    }
-  }
-
+  const providerSlug = await resolveProviderSlug(db, order)
   if (!providerSlug) {
     return c.json({ error: '无法确定服务提供商' }, 500)
   }
@@ -465,6 +495,48 @@ app.get('/order/:orderId/status', async (c) => {
     const adapter = getProvider(providerSlug, getApiKey(providerSlug, c.env))
     const pollResult = await adapter.pollOrder(order.externalOrderId)
     const now = new Date().toISOString()
+
+    // SMSBower：收到短信（received）
+    if (pollResult.status === 'received') {
+      // 幂等判断：只有 order 当前是 pending 时才写记录 + 扣减
+      // （retry 会把 order 设回 pending，所以每次新收到都是 pending → received）
+      const smsId = crypto.randomUUID()
+      await db.insert(orderSms).values({
+        id: smsId,
+        orderId,
+        smsContent: pollResult.smsContent ?? '',
+        verificationCode: pollResult.verificationCode ?? '',
+        receivedAt: now,
+      })
+
+      // 同步写入 order 表（方便 CDK 详情快速读取最新短信）
+      await db
+        .update(orders)
+        .set({
+          status: 'received',
+          smsContent: pollResult.smsContent ?? null,
+          verificationCode: pollResult.verificationCode ?? null,
+        })
+        .where(eq(orders.id, orderId))
+
+      // 扣减 CDK 次数
+      const [cdk] = await db.select().from(cdks).where(eq(cdks.id, order.cdkId))
+      let newRemaining = cdk?.remainingUses ?? 0
+      if (cdk) {
+        newRemaining = Math.max(0, cdk.remainingUses - 1)
+        await db
+          .update(cdks)
+          .set({ remainingUses: newRemaining, status: newRemaining === 0 ? 'exhausted' : cdk.status })
+          .where(eq(cdks.id, order.cdkId))
+      }
+
+      return c.json({
+        status: 'received',
+        smsContent: pollResult.smsContent,
+        verificationCode: pollResult.verificationCode,
+        canRetry: newRemaining > 0,
+      })
+    }
 
     if (pollResult.status === 'completed') {
       await db
@@ -504,6 +576,95 @@ app.get('/order/:orderId/status', async (c) => {
     return c.json({ status: 'pending', timeLeft: pollResult.timeLeft })
   } catch (err) {
     const message = err instanceof Error ? err.message : '查询状态失败'
+    return c.json({ error: message }, 500)
+  }
+})
+
+// ─── POST /api/cdk/order/:id/retry ───────────────────────────────────────────
+// 再发一条：通知上游重发 SMS，将订单状态回退到 pending
+
+app.post('/order/:orderId/retry', async (c) => {
+  const orderId = c.req.param('orderId')
+  const db = getDb(c.env.DB)
+
+  const [order] = await db.select().from(orders).where(eq(orders.id, orderId))
+  if (!order) {
+    return c.json({ error: '订单不存在' }, 404)
+  }
+  if (order.status !== 'received') {
+    return c.json({ error: '只有已收到短信的订单才可再发一条' }, 400)
+  }
+  if (!order.externalOrderId) {
+    return c.json({ error: '订单缺少外部 ID' }, 400)
+  }
+
+  // 检查 CDK 还有剩余次数
+  const [cdk] = await db.select({ remainingUses: cdks.remainingUses }).from(cdks).where(eq(cdks.id, order.cdkId))
+  if (!cdk || cdk.remainingUses <= 0) {
+    return c.json({ error: 'CDK 次数已用完，无法再发' }, 400)
+  }
+
+  const providerSlug = await resolveProviderSlug(db, order)
+  if (!providerSlug) {
+    return c.json({ error: '无法确定服务提供商' }, 500)
+  }
+
+  try {
+    const adapter = getProvider(providerSlug, getApiKey(providerSlug, c.env))
+    await adapter.retryOrder(order.externalOrderId)
+
+    // 订单回退到 pending，继续轮询
+    await db
+      .update(orders)
+      .set({ status: 'pending' })
+      .where(eq(orders.id, orderId))
+
+    return c.json({ success: true })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : '再发失败，请稍后重试'
+    return c.json({ error: message }, 500)
+  }
+})
+
+// ─── POST /api/cdk/order/:id/finish ──────────────────────────────────────────
+// 完成：确认激活结束，将订单标为 completed
+
+app.post('/order/:orderId/finish', async (c) => {
+  const orderId = c.req.param('orderId')
+  const db = getDb(c.env.DB)
+
+  const [order] = await db.select().from(orders).where(eq(orders.id, orderId))
+  if (!order) {
+    return c.json({ error: '订单不存在' }, 404)
+  }
+  if (order.status !== 'received' && order.status !== 'pending') {
+    return c.json({ error: '订单状态不允许执行完成操作' }, 400)
+  }
+  if (!order.externalOrderId) {
+    return c.json({ error: '订单缺少外部 ID' }, 400)
+  }
+
+  const providerSlug = await resolveProviderSlug(db, order)
+  if (!providerSlug) {
+    return c.json({ error: '无法确定服务提供商' }, 500)
+  }
+
+  try {
+    const adapter = getProvider(providerSlug, getApiKey(providerSlug, c.env))
+    // 尽力调用 confirmOrder（忽略失败）
+    await adapter.confirmOrder(order.externalOrderId).catch((err: unknown) =>
+      console.warn(`[finish] confirmOrder failed for order ${orderId}:`, err),
+    )
+
+    const now = new Date().toISOString()
+    await db
+      .update(orders)
+      .set({ status: 'completed', completedAt: now })
+      .where(eq(orders.id, orderId))
+
+    return c.json({ success: true })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : '完成操作失败'
     return c.json({ error: message }, 500)
   }
 })

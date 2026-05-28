@@ -4,6 +4,12 @@ export interface OrderOptions {
   blockedCountries: string[]
   /** ISO 2-letter country code; if set, only this country is attempted */
   countryCode?: string
+  /**
+   * SMSBower 官方 API 服务代码（如 'oi'），用于 getNumberV2 接口。
+   * 与 externalServiceId（内部数字 ID，用于 getPricesByService）不同。
+   * 未设置时回落到 externalServiceId（可能导致 WRONG_SERVICE 错误）。
+   */
+  officialServiceCode?: string
 }
 
 export interface OrderResult {
@@ -39,4 +45,8 @@ export interface SmsProvider {
   pollOrder(externalOrderId: string): Promise<PollResult>
   cancelOrder(externalOrderId: string): Promise<void>
   getPoolStatus(externalServiceId: string): Promise<PoolCountryStatus[]>
+  /** SMSBower：请求重发短信（status=3），其他适配器可 no-op */
+  retryOrder(externalOrderId: string): Promise<void>
+  /** SMSBower：确认激活结束（status=6），其他适配器可 no-op */
+  confirmOrder(externalOrderId: string): Promise<void>
 }

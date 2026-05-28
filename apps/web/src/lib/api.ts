@@ -38,10 +38,11 @@ export interface OrderResult {
 }
 
 export interface PollResult {
-  status: 'pending' | 'completed' | 'expired' | 'cancelled'
+  status: 'pending' | 'completed' | 'expired' | 'cancelled' | 'received'
   smsContent?: string
   verificationCode?: string
   timeLeft?: number
+  canRetry?: boolean
 }
 
 export const cdkApi = {
@@ -59,4 +60,10 @@ export const cdkApi = {
 
   pollOrder: (orderId: string) =>
     request<PollResult>(`/api/cdk/order/${orderId}/status`),
+
+  retryOrder: (orderId: string) =>
+    request<{ success: boolean }>(`/api/cdk/order/${orderId}/retry`, { method: 'POST' }),
+
+  finishOrder: (orderId: string) =>
+    request<{ success: boolean }>(`/api/cdk/order/${orderId}/finish`, { method: 'POST' }),
 }

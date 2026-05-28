@@ -263,4 +263,8 @@ export class SmsPoolAdapter implements SmsProvider {
       // 尽力取消，忽略错误
     }
   }
+
+  // SMSPool 不支持多次接收，no-op 实现满足接口约束
+  async retryOrder(_externalOrderId: string): Promise<void> {}
+  async confirmOrder(_externalOrderId: string): Promise<void> {}
 }
