@@ -82,15 +82,19 @@ CDK（兑换码，绑定 ServiceCategory + 可选 countryCode）
 **SMSPool：**
 ```
 input → confirm → waiting → success
-                           → timeout → confirm（可换运营商重试）
+                          → timeout  → confirm（可换运营商重试）
+                          → cancel   → confirm（取消，冷却 2 分钟后可操作）
+                          → change   → waiting（换号，同 orderId，changeCount+1，最多 2 次）
         error（CDK 无效或已用完）
 ```
 
 **SMSBower（新增 received 中间态）：**
 ```
 input → confirm → waiting → received → waiting（点再发一条）
-                                      → success（点完成 / 次数用完 / 超时）
-                           → timeout → confirm（可换运营商重试）
+                                     → success（点完成 / 次数用完 / 超时）
+                          → timeout  → confirm（可换运营商重试）
+                          → cancel   → confirm（取消，冷却 2 分钟后可操作）
+                          → change   → waiting（换号，同 orderId，changeCount+1，最多 2 次）
         error
 ```
 
@@ -132,20 +136,48 @@ input → confirm → waiting → received → waiting（点再发一条）
 2. 前端回到 confirm 步骤，用户选新运营商，创建新订单
 3. 新订单记录 `fromOrderId`，指向被取消的旧订单，方便 admin 追踪切换链路
 
-### 4.5 【再发一条】按钮（SMSBower）
+### 4.5 取消取号（waiting 步骤）
+
+用户在等待阶段可主动放弃本次取号：
+
+- 点击【取消】→ 后端调 `cancelOrder`（SMSBower: setStatus=8）→ 订单标为 `cancelled` → 前端回到 `confirm` 步骤
+- 2 分钟冷却期：取号后 2 分钟内按钮禁用，显示剩余倒计时（与换号共用同一倒计时）
+- 冷却对齐 SMSBower 平台限制（购买 2 分钟内不可取消，否则报 EARLY_CANCEL_DENIED）
+- 取消不消耗 CDK 次数（次数仅在收到短信时扣减）
+
+### 4.6 换号（waiting 步骤）
+
+用户在等待阶段觉得当前号码不合适，可换一个新号：
+
+- 点击【换号】→ 后端取消当前号 + 重新取号（沿用同一运营商）→ 同一 orderId，更新手机号 + changeCount +1
+- 2 分钟冷却期：与取消共用同一倒计时
+- 换号上限：每次使用最多换号 **2 次**（后端按 `changeCount` 校验，切换浏览器/新 session 重置）
+- 达到上限后换号按钮置灰，提示"已达换号上限"
+- 换号不消耗 CDK 次数
+
+**换号规则汇总：**
+
+| 条件 | 行为 |
+|------|------|
+| 距取号 < 2 分钟 | 按钮禁用 + 倒计时 |
+| changeCount < 2 | 可换号 |
+| changeCount ≥ 2 | 按钮置灰 + "已达换号上限" |
+| 换号成功 | 同一 orderId，更新号码，changeCount +1，重新进入 waiting |
+
+### 4.7 【再发一条】按钮（SMSBower）
 
 - 仅 SMSBower 平台且 CDK 有剩余次数时显示
 - 点击后：后端调 `setStatus=3`，订单回到 `pending`，前端恢复轮询
 - 每次收到新短信：CDK 扣 1 次，判断剩余次数决定是否继续显示该按钮
 
-### 4.6 完成激活逻辑（SMSBower）
+### 4.8 完成激活逻辑（SMSBower）
 
 以下任一条件触发 `setStatus=6`，订单标为 `completed`：
 1. 用户主动点击【完成】
 2. CDK 次数扣完（无法再发）
 3. 倒计时归零（前端主动调 finish 接口）
 
-### 4.7 限制规则
+### 4.9 限制规则
 
 - 同一 CDK 存在 `pending` 或 `received` 状态的订单时，不允许新建订单
 - CDK 剩余次数为 0 → 直接进 error
@@ -367,6 +399,7 @@ CREATE TABLE pool_status_cache (
 | `service_id` | TEXT NOT NULL | 本次下单实际使用的 Service（FK） |
 | `cancelled_reason` | TEXT nullable | 取消原因枚举 |
 | `from_order_id` | TEXT nullable | 切换运营商时，指向被取消的上一个订单 |
+| `change_count` | INTEGER NOT NULL DEFAULT 0 | 换号次数，每次换号 +1，上限 2 次；换浏览器（新 session）重置 |
 
 **`orders.status` 新增值：**
 
@@ -409,12 +442,41 @@ CREATE TABLE pool_status_cache (
 { "cdkId": "uuid", "serviceId": "uuid-1" }
 ```
 
+### order 接口响应（新增字段）
+
+```json
+{
+  "orderId": "uuid",
+  "phoneNumber": "1xxxxxxxxxx",
+  "expiresIn": 1200,
+  "changeCount": 0,
+  "orderedAt": "2026-05-28T10:00:00.000Z"
+}
+```
+
+- `changeCount`：当前换号次数，前端用于判断是否显示换号按钮
+- `orderedAt`：取号时间，前端用于计算 2 分钟冷却是否结束
+
 ### 新增接口
 
 | 接口 | 说明 |
 |------|------|
 | `POST /api/cdk/order/:id/retry` | SMSBower 再发一条（setStatus=3） |
 | `POST /api/cdk/order/:id/finish` | SMSBower 完成激活（setStatus=6） |
+| `POST /api/cdk/order/:id/cancel` | 取消取号（setStatus=8），订单标为 cancelled，仅 waiting 阶段可用 |
+| `POST /api/cdk/order/:id/change` | 换号：取消当前号 + 重取（同一 orderId，changeCount+1，上限 2 次） |
+
+**change 接口响应：**
+
+```json
+{
+  "orderId": "uuid",
+  "phoneNumber": "1xxxxxxxxxx（新号）",
+  "expiresIn": 1200,
+  "changeCount": 1,
+  "orderedAt": "2026-05-28T10:02:00.000Z"
+}
+```
 
 ---
 
