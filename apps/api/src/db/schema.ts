@@ -57,6 +57,10 @@ export const orders = sqliteTable('orders', {
   createdAt: text('created_at').notNull(),
   completedAt: text('completed_at'),
   expiresAt: text('expires_at'),
+  // Step 8: 换号次数与取消原因
+  changeCount: integer('change_count').notNull().default(0),
+  cancelledReason: text('cancelled_reason'),
+  orderedAt: text('ordered_at'),
 })
 
 export const poolStatusCache = sqliteTable('pool_status_cache', {

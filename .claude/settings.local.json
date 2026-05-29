@@ -12,7 +12,11 @@
       "Bash(curl -s http://localhost:5175)",
       "Bash(curl *)",
       "Bash(lsof -ti:5175)",
-      "Bash(pnpm --filter web build)"
+      "Bash(pnpm --filter web build)",
+      "Bash(node_modules/.bin/tsc --project apps/api/tsconfig.json --noEmit)",
+      "Bash(node_modules/.bin/tsc --project apps/web/tsconfig.app.json --noEmit)",
+      "Bash(apps/api/node_modules/.bin/tsc --project apps/api/tsconfig.json --noEmit)",
+      "Bash(apps/web/node_modules/.bin/tsc --project apps/web/tsconfig.app.json --noEmit)"
     ]
   }
 }

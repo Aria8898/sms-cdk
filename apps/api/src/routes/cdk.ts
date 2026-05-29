@@ -445,10 +445,10 @@ app.post('/order', async (c) => {
 
     await db
       .update(orders)
-      .set({ externalOrderId: result.orderId, phoneNumber: result.phoneNumber, expiresAt })
+      .set({ externalOrderId: result.orderId, phoneNumber: result.phoneNumber, expiresAt, orderedAt: now })
       .where(eq(orders.id, orderId))
 
-    return c.json({ orderId, phoneNumber: result.phoneNumber, expiresIn: result.expiresIn })
+    return c.json({ orderId, phoneNumber: result.phoneNumber, expiresIn: result.expiresIn, changeCount: 0, orderedAt: now })
   } catch (err) {
     await db
       .update(orders)
@@ -688,6 +688,150 @@ app.post('/order/:orderId/finish', async (c) => {
     return c.json({ success: true })
   } catch (err) {
     const message = err instanceof Error ? err.message : '完成操作失败'
+    return c.json({ error: message }, 500)
+  }
+})
+
+// ─── POST /api/cdk/order/:id/cancel ──────────────────────────────────────────
+// 取消取号：通知上游取消，订单状态变为 cancelled
+
+app.post('/order/:orderId/cancel', async (c) => {
+  const orderId = c.req.param('orderId')
+  const db = getDb(c.env.DB)
+
+  const [order] = await db.select().from(orders).where(eq(orders.id, orderId))
+  if (!order) {
+    return c.json({ error: '订单不存在' }, 404)
+  }
+  if (order.status !== 'pending') {
+    return c.json({ error: '只有等待中的订单才可取消' }, 400)
+  }
+  if (!order.externalOrderId) {
+    return c.json({ error: '订单缺少外部 ID' }, 400)
+  }
+
+  // 检查 2 分钟冷却（EARLY_CANCEL_DENIED 限制）
+  if (order.orderedAt) {
+    const elapsedMs = Date.now() - new Date(order.orderedAt).getTime()
+    if (elapsedMs < 2 * 60 * 1000) {
+      const secondsLeft = Math.ceil((2 * 60 * 1000 - elapsedMs) / 1000)
+      return c.json({ error: `取消需等待 ${secondsLeft} 秒`, secondsLeft }, 400)
+    }
+  }
+
+  const providerSlug = await resolveProviderSlug(db, order)
+  if (!providerSlug) {
+    return c.json({ error: '无法确定服务提供商' }, 500)
+  }
+
+  try {
+    const adapter = getProvider(providerSlug, getApiKey(providerSlug, c.env))
+    await adapter.cancelOrder(order.externalOrderId)
+
+    const now = new Date().toISOString()
+    await db
+      .update(orders)
+      .set({ status: 'cancelled', completedAt: now, cancelledReason: 'user_cancel' })
+      .where(eq(orders.id, orderId))
+
+    return c.json({ success: true })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : '取消失败，请稍后重试'
+    return c.json({ error: message }, 500)
+  }
+})
+
+// ─── POST /api/cdk/order/:id/change ──────────────────────────────────────────
+// 换号：取消当前号码，重新取一个号（复用同一订单，changeCount+1）
+
+app.post('/order/:orderId/change', async (c) => {
+  const orderId = c.req.param('orderId')
+  const db = getDb(c.env.DB)
+
+  const [order] = await db.select().from(orders).where(eq(orders.id, orderId))
+  if (!order) {
+    return c.json({ error: '订单不存在' }, 404)
+  }
+  if (order.status !== 'pending') {
+    return c.json({ error: '只有等待中的订单才可换号' }, 400)
+  }
+  if (!order.externalOrderId) {
+    return c.json({ error: '订单缺少外部 ID' }, 400)
+  }
+  if (order.changeCount >= 2) {
+    return c.json({ error: '已达换号上限（最多换号 2 次）' }, 400)
+  }
+
+  // 检查 2 分钟冷却
+  if (order.orderedAt) {
+    const elapsedMs = Date.now() - new Date(order.orderedAt).getTime()
+    if (elapsedMs < 2 * 60 * 1000) {
+      const secondsLeft = Math.ceil((2 * 60 * 1000 - elapsedMs) / 1000)
+      return c.json({ error: `换号需等待 ${secondsLeft} 秒`, secondsLeft }, 400)
+    }
+  }
+
+  const [serviceRow] = await db
+    .select({
+      id: services.id,
+      externalServiceId: services.externalServiceId,
+      smsbowerServiceCode: services.smsbowerServiceCode,
+      maxPrice: services.maxPrice,
+      successRateThreshold: services.successRateThreshold,
+      blockedCountries: services.blockedCountries,
+      providerSlug: providers.slug,
+    })
+    .from(services)
+    .leftJoin(providers, eq(providers.id, services.providerId))
+    .where(eq(services.id, order.serviceId!))
+
+  if (!serviceRow?.providerSlug) {
+    return c.json({ error: '无法确定服务提供商' }, 500)
+  }
+
+  // 查 CDK 的 countryCode
+  const [cdkRow] = await db.select({ countryCode: cdks.countryCode }).from(cdks).where(eq(cdks.id, order.cdkId))
+
+  try {
+    const adapter = getProvider(serviceRow.providerSlug, getApiKey(serviceRow.providerSlug, c.env))
+
+    // 1. 取消旧号码
+    await adapter.cancelOrder(order.externalOrderId)
+
+    // 2. 取新号码
+    const result = await adapter.orderNumber(serviceRow.externalServiceId!, {
+      maxPrice: serviceRow.maxPrice!,
+      successRateThreshold: serviceRow.successRateThreshold!,
+      blockedCountries: JSON.parse(serviceRow.blockedCountries ?? '[]') as string[],
+      countryCode: cdkRow?.countryCode ?? undefined,
+      officialServiceCode: serviceRow.smsbowerServiceCode ?? undefined,
+    })
+
+    const now = new Date().toISOString()
+    const expiresAt = new Date(Date.now() + result.expiresIn * 1000).toISOString()
+    const newChangeCount = order.changeCount + 1
+
+    await db
+      .update(orders)
+      .set({
+        externalOrderId: result.orderId,
+        phoneNumber: result.phoneNumber,
+        expiresAt,
+        orderedAt: now,
+        changeCount: newChangeCount,
+        smsContent: null,
+        verificationCode: null,
+      })
+      .where(eq(orders.id, orderId))
+
+    return c.json({
+      phoneNumber: result.phoneNumber,
+      expiresIn: result.expiresIn,
+      changeCount: newChangeCount,
+      orderedAt: now,
+    })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : '换号失败，请稍后重试'
     return c.json({ error: message }, 500)
   }
 })

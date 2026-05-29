@@ -2,6 +2,26 @@ import { useState, useEffect, useRef } from 'react'
 import { cdkApi, mockConfig } from '../lib/api'
 import type { PoolOption, MockScenario } from '../lib/api'
 
+// ─── 冷却倒计时 hook ──────────────────────────────────────────────────────────
+
+function useCooldownSeconds(orderedAt?: string, cooldownSec = 120): number {
+  const [left, setLeft] = useState(() => {
+    if (!orderedAt) return 0
+    return Math.max(0, Math.ceil(cooldownSec - (Date.now() - new Date(orderedAt).getTime()) / 1000))
+  })
+  useEffect(() => {
+    if (!orderedAt) { setLeft(0); return }
+    const update = () => {
+      const s = Math.max(0, Math.ceil(cooldownSec - (Date.now() - new Date(orderedAt).getTime()) / 1000))
+      setLeft(s)
+    }
+    update()
+    const t = setInterval(update, 1000)
+    return () => clearInterval(t)
+  }, [orderedAt, cooldownSec])
+  return left
+}
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 type Phase = 'idle' | 'confirm' | 'waiting' | 'received' | 'success' | 'timeout'
@@ -30,6 +50,7 @@ interface FlowData {
   secondsLeft?: number
   smsHistory: SmsRecord[]
   changeCount: number
+  orderedAt?: string
 }
 
 const DEFAULT_DATA: FlowData = {
@@ -236,6 +257,8 @@ function ConfirmPanel({ data, onConfirm, onBack }: ConfirmPanelProps) {
         expiresIn: result.expiresIn,
         secondsLeft: result.expiresIn,
         selectedServiceId: selectedId,
+        changeCount: result.changeCount,
+        orderedAt: result.orderedAt,
       })
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : '取号失败，请重试')
@@ -403,9 +426,14 @@ function SessionPanel({ phase, data, onPhaseChange }: SessionPanelProps) {
             sms: result.smsContent ?? '',
             code: result.verificationCode ?? '',
           })
-        } else if (result.status === 'expired' || result.status === 'cancelled') {
+        } else if (result.status === 'expired') {
           clearInterval(interval)
           if (timerRef.current) clearInterval(timerRef.current)
+          onPhaseChangeRef.current('timeout')
+        } else if (result.status === 'cancelled') {
+          clearInterval(interval)
+          if (timerRef.current) clearInterval(timerRef.current)
+          // cancelled 由换号/取消触发，PhoneCard 自己管状态跳转，这里兜底跳 timeout
           onPhaseChangeRef.current('timeout')
         }
       } catch {
@@ -449,8 +477,12 @@ interface CardProps {
   stopTimer?: () => void
 }
 
-function PhoneCard({ phase, data, seconds, onPhaseChange }: CardProps) {
+function PhoneCard({ phase, data, onPhaseChange }: CardProps) {
   const [copied, setCopied] = useState(false)
+  const [isCancelling, setIsCancelling] = useState(false)
+  const [isChanging, setIsChanging] = useState(false)
+  const [actionError, setActionError] = useState('')
+  const cooldownLeft = useCooldownSeconds(data.orderedAt)
 
   function handleCopy() {
     navigator.clipboard.writeText(data.phone ?? '').then(() => {
@@ -459,7 +491,44 @@ function PhoneCard({ phase, data, seconds, onPhaseChange }: CardProps) {
     })
   }
 
+  async function handleCancel() {
+    if (!data.orderId) return
+    setIsCancelling(true)
+    setActionError('')
+    try {
+      await cdkApi.cancelOrder(data.orderId)
+      onPhaseChange('confirm')
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : '取消失败，请重试')
+      setIsCancelling(false)
+    }
+  }
+
+  async function handleChange() {
+    if (!data.orderId) return
+    setIsChanging(true)
+    setActionError('')
+    try {
+      const result = await cdkApi.changeNumber(data.orderId)
+      onPhaseChange('waiting', {
+        phone: result.phoneNumber,
+        expiresIn: result.expiresIn,
+        secondsLeft: result.expiresIn,
+        changeCount: result.changeCount,
+        orderedAt: result.orderedAt,
+        sms: undefined,
+        code: undefined,
+      })
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : '换号失败，请重试')
+      setIsChanging(false)
+    }
+  }
+
   const isActive = phase === 'waiting' || phase === 'received'
+  const isBusy = isCancelling || isChanging
+  const changeExhausted = data.changeCount >= 2
+  const inCooldown = cooldownLeft > 0
 
   return (
     <div className="bg-white rounded-2xl shadow-sm p-5 flex flex-col gap-4">
@@ -507,12 +576,45 @@ function PhoneCard({ phase, data, seconds, onPhaseChange }: CardProps) {
         <span className="text-xs bg-indigo-50 text-indigo-500 px-2 py-0.5 rounded-full border border-indigo-100">
           验证码: {data.smsHistory.length}/{data.total}次
         </span>
-        <span className="text-xs bg-gray-50 text-gray-400 px-2 py-0.5 rounded-full border border-gray-100">
+        <span className={`text-xs px-2 py-0.5 rounded-full border ${changeExhausted ? 'bg-red-50 text-red-400 border-red-100' : 'bg-gray-50 text-gray-400 border-gray-100'}`}>
           换号: {data.changeCount}/2次
         </span>
       </div>
 
       <div className="flex-1" />
+
+      {/* waiting 阶段：取消 & 换号 */}
+      {phase === 'waiting' && (
+        <div className="space-y-2">
+          {actionError && (
+            <div className="bg-red-50 border border-red-100 rounded-xl px-3 py-2">
+              <p className="text-xs text-red-600">{actionError}</p>
+            </div>
+          )}
+          {inCooldown && (
+            <p className="text-xs text-gray-400 text-center">
+              操作冷却中，{pad(Math.floor(cooldownLeft / 60))}:{pad(cooldownLeft % 60)} 后可用
+            </p>
+          )}
+          <div className="flex gap-2">
+            <button
+              onClick={handleCancel}
+              disabled={isBusy || inCooldown}
+              className="flex-1 py-2 rounded-xl border border-gray-200 text-gray-500 text-xs font-medium hover:border-red-200 hover:text-red-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {isCancelling ? '取消中...' : '取消取号'}
+            </button>
+            <button
+              onClick={handleChange}
+              disabled={isBusy || inCooldown || changeExhausted}
+              title={changeExhausted ? '已达换号上限' : undefined}
+              className="flex-1 py-2 rounded-xl border border-indigo-200 text-indigo-600 text-xs font-medium hover:bg-indigo-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {isChanging ? '换号中...' : changeExhausted ? '已达换号上限' : `换号（剩 ${2 - data.changeCount} 次）`}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 超时：重新取号 */}
       {phase === 'timeout' && (
@@ -791,6 +893,8 @@ const SCENARIOS: { value: MockScenario; label: string; desc: string }[] = [
   { value: 'create_fail', label: 'create_fail', desc: 'confirm 页取号失败' },
   { value: 'retry_fail',  label: 'retry_fail',  desc: 'received 页再发失败' },
   { value: 'finish_fail', label: 'finish_fail', desc: 'received 页完成失败' },
+  { value: 'cancel_fail', label: 'cancel_fail', desc: '取消取号失败' },
+  { value: 'change_fail', label: 'change_fail', desc: '换号失败' },
 ]
 
 function MockPanel() {
@@ -906,12 +1010,15 @@ export default function Home() {
   }
 
   async function handleClear() {
-    // received 阶段需先 finish 关闭激活，waiting/其他阶段直接清除
-    // cancel 接口后端暂未实现，waiting 阶段直接清除，订单等待自然超时
-    if (phase === 'received' && data.orderId) {
+    if (data.orderId) {
       setIsClearing(true)
       try {
-        await cdkApi.finishOrder(data.orderId)
+        if (phase === 'received') {
+          await cdkApi.finishOrder(data.orderId)
+        } else if (phase === 'waiting') {
+          // 尝试取消，失败静默忽略（冷却期内或网络错误）
+          await cdkApi.cancelOrder(data.orderId).catch(() => {})
+        }
       } catch {
         // 静默忽略，无论成功与否都清除前端状态
       }

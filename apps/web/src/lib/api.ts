@@ -35,6 +35,15 @@ export interface OrderResult {
   orderId: string
   phoneNumber: string
   expiresIn: number
+  changeCount: number
+  orderedAt: string
+}
+
+export interface ChangeResult {
+  phoneNumber: string
+  expiresIn: number
+  changeCount: number
+  orderedAt: string
 }
 
 export interface PollResult {
@@ -54,6 +63,8 @@ export type MockScenario =
   | 'create_fail'
   | 'retry_fail'
   | 'finish_fail'
+  | 'cancel_fail'
+  | 'change_fail'
 
 /** MockPanel 通过直接修改此对象的字段来控制 mock 行为，无需重新导入 */
 export const mockConfig = {
@@ -77,7 +88,7 @@ async function mockCreateOrder(_cdkId: string, _serviceId?: string): Promise<Ord
   }
   await sleep(600)
   _mockOrderStartedAt = Date.now()
-  return { orderId: 'mock-order-id', phoneNumber: '+1 555 847 2910', expiresIn: 1200 }
+  return { orderId: 'mock-order-id', phoneNumber: '+1 555 847 2910', expiresIn: 1200, changeCount: 0, orderedAt: new Date().toISOString() }
 }
 
 async function mockPollOrder(_orderId: string): Promise<PollResult> {
@@ -126,6 +137,32 @@ async function mockFinishOrder(_orderId: string): Promise<{ success: boolean }> 
   return { success: true }
 }
 
+async function mockCancelOrder(_orderId: string): Promise<{ success: boolean }> {
+  if (mockConfig.scenario === 'cancel_fail') {
+    await sleep(500)
+    throw new Error('取消失败（Mock）')
+  }
+  await sleep(600)
+  return { success: true }
+}
+
+let _mockChangeCount = 0
+async function mockChangeNumber(_orderId: string): Promise<ChangeResult> {
+  if (mockConfig.scenario === 'change_fail') {
+    await sleep(500)
+    throw new Error('换号失败（Mock）')
+  }
+  await sleep(800)
+  _mockOrderStartedAt = Date.now()
+  _mockChangeCount += 1
+  return {
+    phoneNumber: '+1 555 ' + Math.floor(Math.random() * 900 + 100) + ' ' + Math.floor(Math.random() * 9000 + 1000),
+    expiresIn: 1200,
+    changeCount: _mockChangeCount,
+    orderedAt: new Date().toISOString(),
+  }
+}
+
 // ─── API ──────────────────────────────────────────────────────────────────────
 
 function withMock<TArgs extends unknown[], TReturn>(
@@ -168,5 +205,17 @@ export const cdkApi = {
     (orderId: string) =>
       request<{ success: boolean }>(`/api/cdk/order/${orderId}/finish`, { method: 'POST' }),
     mockFinishOrder,
+  ),
+
+  cancelOrder: withMock(
+    (orderId: string) =>
+      request<{ success: boolean }>(`/api/cdk/order/${orderId}/cancel`, { method: 'POST' }),
+    mockCancelOrder,
+  ),
+
+  changeNumber: withMock(
+    (orderId: string) =>
+      request<ChangeResult>(`/api/cdk/order/${orderId}/change`, { method: 'POST' }),
+    mockChangeNumber,
   ),
 }
