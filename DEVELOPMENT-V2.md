@@ -7,6 +7,55 @@
 
 ---
 
+## 本地 Mock 开发工具
+
+**目标：** 本地调试体验问题时绕过真实取号和 SMS 接收，无需消耗真实号码或等待短信。
+
+| 层 | 改动 |
+|----|------|
+| Web | `apps/web/src/lib/api.ts` 加 mock 实现层（~50 行） |
+| Web | `apps/web/src/pages/Home.tsx` 末尾加浮层控制台组件（~70 行，仅 `import.meta.env.DEV` 下渲染） |
+
+**数据库影响：**
+- `createOrder` / `pollOrder` / `retryOrder` / `finishOrder` 全部被拦截，**不产生任何订单记录，CDK 不扣次数**
+- `validate` 保持真实请求，仅写 `pool_status_cache`（无害缓存）
+
+**控制台 UI（页面右下角浮层）：**
+
+```
+┌─────────────────────────┐
+│  🧪 Mock 控制台          │
+│                         │
+│  场景                   │
+│  ● received (默认)      │
+│  ○ completed (直达成功) │
+│  ○ timeout              │
+│  ○ create_fail          │
+│  ○ retry_fail           │
+│  ○ finish_fail          │
+│                         │
+│  延迟  [====|----] 3s   │
+│  canRetry  [ON ]        │
+└─────────────────────────┘
+```
+
+**可覆盖的测试场景：**
+
+| 场景 | 覆盖的 UI 分支 |
+|------|--------------|
+| `received` + canRetry=true | waiting → received，倒计时 + 再发一条 + 完成 |
+| `received` + canRetry=false | waiting → received，仅显示再次兑换 |
+| `completed` | waiting → success 直达（SMSPool 路径，跳过 received） |
+| `timeout` | waiting → timeout |
+| `create_fail` | confirm 页 createOrder 失败 errorMsg |
+| `retry_fail` | received 页再发一条失败 errorMsg |
+| `finish_fail` | received 页完成失败 errorMsg |
+
+**无法覆盖（需真实流程）：**
+- CDK 次数实时扣减（使用真实 CDK 验证一次即可）
+
+---
+
 ## 依赖关系
 
 ```

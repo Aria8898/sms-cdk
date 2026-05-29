@@ -648,6 +648,47 @@ COMMIT
 
 ---
 
-## 十三、开发计划
+## 十三、本地开发 Mock 方案
+
+为方便本地调试体验问题，web 前端提供 mock 模式，绕过真实取号和等待短信的流程。
+
+### Mock 范围
+
+| 方法 | Mock 后行为 | 数据库影响 |
+|------|------------|----------|
+| `validate` | 保持真实（检查 CDK 有效性） | 写 pool_status_cache（无害缓存） |
+| `createOrder` | 直接返回假号码 | **无写入** |
+| `pollOrder` | 按场景返回预设结果 | **无写入，CDK 不扣次数** |
+| `retryOrder` | 直接返回 success | **无写入** |
+| `finishOrder` | 直接返回 success | **无写入** |
+
+### 实现方式
+
+页面右下角浮层控制台（仅开发模式渲染），包含：
+- **场景选择**：控制 pollOrder / createOrder 的返回行为
+- **延迟配置**：模拟等待感（1–10 秒）
+- **canRetry 开关**：测试"再发一条"与"再次兑换"两个分支
+
+无需配置环境变量，开关在 UI 上操作，切换实时生效。
+
+### 可覆盖的测试场景
+
+| 场景 | 覆盖的 UI 分支 |
+|------|--------------|
+| `received` + canRetry=true | waiting → received，倒计时 + 再发一条 + 完成 |
+| `received` + canRetry=false | waiting → received，仅显示再次兑换 |
+| `completed` | waiting → success 直达（SMSPool 路径） |
+| `timeout` | waiting → timeout |
+| `create_fail` | confirm 页 createOrder 失败 errorMsg |
+| `retry_fail` | received 页再发一条失败 errorMsg |
+| `finish_fail` | received 页完成失败 errorMsg |
+
+### 无法 mock 的场景
+
+- CDK 次数实时扣减：使用真实 CDK 验证一次即可，不需要反复调
+
+---
+
+## 十四、开发计划
 
 详见 [DEVELOPMENT-V2.md](./DEVELOPMENT-V2.md)。
