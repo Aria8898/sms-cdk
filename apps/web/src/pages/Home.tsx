@@ -661,6 +661,7 @@ function CodeCard({ phase, data, seconds, onPhaseChange, stopTimer }: CardProps)
     stopTimer?.()
     try {
       await cdkApi.retryOrder(data.orderId)
+      setIsRetrying(false)
       onPhaseChange('waiting', { secondsLeft: seconds })
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : '再发失败，请重试')
@@ -675,6 +676,7 @@ function CodeCard({ phase, data, seconds, onPhaseChange, stopTimer }: CardProps)
     stopTimer?.()
     try {
       await cdkApi.finishOrder(data.orderId)
+      setIsFinishing(false)
       onPhaseChange('success')
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : '完成失败，请重试')
@@ -903,13 +905,15 @@ function MockPanel() {
   const [scenario, setScenario] = useState<MockScenario>('received')
   const [delaySec, setDelaySec] = useState(3)
   const [canRetry, setCanRetry] = useState(true)
+  const [skipCooldown, setSkipCooldown] = useState(false)
 
   useEffect(() => {
     mockConfig.enabled = enabled
     mockConfig.scenario = scenario
     mockConfig.delayMs = delaySec * 1000
     mockConfig.canRetry = canRetry
-  }, [enabled, scenario, delaySec, canRetry])
+    mockConfig.skipCooldown = skipCooldown
+  }, [enabled, scenario, delaySec, canRetry, skipCooldown])
 
   if (!open) {
     return (
@@ -987,6 +991,21 @@ function MockPanel() {
                   className={`relative w-11 h-6 rounded-full transition-colors ${canRetry ? 'bg-indigo-500' : 'bg-gray-300'}`}
                 >
                   <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${canRetry ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                </button>
+              </div>
+            )}
+
+            {(scenario === 'received' || scenario === 'timeout' || scenario === 'cancel_fail' || scenario === 'change_fail') && (
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">跳过冷却</span>
+                  <p className="text-xs text-gray-400 mt-0.5">取消/换号按钮立即可用</p>
+                </div>
+                <button
+                  onClick={() => setSkipCooldown(v => !v)}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${skipCooldown ? 'bg-amber-400' : 'bg-gray-300'}`}
+                >
+                  <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${skipCooldown ? 'translate-x-5' : 'translate-x-0.5'}`} />
                 </button>
               </div>
             )}

@@ -72,6 +72,7 @@ export const mockConfig = {
   scenario: 'received' as MockScenario,
   delayMs: 3000,
   canRetry: true,
+  skipCooldown: false,
 }
 
 /** createOrder / retryOrder 成功时记录时间，pollOrder 据此判断是否还在"等待"阶段 */
@@ -88,7 +89,12 @@ async function mockCreateOrder(_cdkId: string, _serviceId?: string): Promise<Ord
   }
   await sleep(600)
   _mockOrderStartedAt = Date.now()
-  return { orderId: 'mock-order-id', phoneNumber: '+1 555 847 2910', expiresIn: 1200, changeCount: 0, orderedAt: new Date().toISOString() }
+  _mockChangeCount = 0
+  // skipCooldown：返回 2 分钟前的时间，让按钮立即可用
+  const orderedAt = mockConfig.skipCooldown
+    ? new Date(Date.now() - 121_000).toISOString()
+    : new Date().toISOString()
+  return { orderId: 'mock-order-id', phoneNumber: '+1 555 847 2910', expiresIn: 1200, changeCount: 0, orderedAt }
 }
 
 async function mockPollOrder(_orderId: string): Promise<PollResult> {
@@ -155,11 +161,14 @@ async function mockChangeNumber(_orderId: string): Promise<ChangeResult> {
   await sleep(800)
   _mockOrderStartedAt = Date.now()
   _mockChangeCount += 1
+  const orderedAt = mockConfig.skipCooldown
+    ? new Date(Date.now() - 121_000).toISOString()
+    : new Date().toISOString()
   return {
     phoneNumber: '+1 555 ' + Math.floor(Math.random() * 900 + 100) + ' ' + Math.floor(Math.random() * 9000 + 1000),
     expiresIn: 1200,
     changeCount: _mockChangeCount,
-    orderedAt: new Date().toISOString(),
+    orderedAt,
   }
 }
 
