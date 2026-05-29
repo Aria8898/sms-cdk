@@ -4,7 +4,13 @@ import type { PoolOption, MockScenario } from '../lib/api'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-type Step = 'input' | 'confirm' | 'waiting' | 'received' | 'success' | 'timeout' | 'error'
+type Phase = 'idle' | 'confirm' | 'waiting' | 'received' | 'success' | 'timeout'
+
+interface SmsRecord {
+  code: string
+  sms: string
+  receivedAt: string
+}
 
 interface FlowData {
   cdk: string
@@ -17,25 +23,23 @@ interface FlowData {
   expiresIn?: number
   sms?: string
   code?: string
-  errorType?: 'invalid' | 'exhausted' | 'unknown'
   countryCode?: string
   pools?: PoolOption[]
   selectedServiceId?: string
   canRetry?: boolean
-  /** waiting 步骤剩余秒数，切换到 received 时快照，保持倒计时连续 */
   secondsLeft?: number
+  smsHistory: SmsRecord[]
+  changeCount: number
 }
 
-type GoTo = (nextStep: Step, patch?: Partial<FlowData>) => void
-
-interface StepProps {
-  data: FlowData
-  goTo: GoTo
+const DEFAULT_DATA: FlowData = {
+  cdk: '', cdkId: '', service: '',
+  remaining: 0, total: 0, orderId: '',
+  smsHistory: [], changeCount: 0,
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/** 将 ISO 2 字母码转换为旗帜 Emoji（如 "US" → "🇺🇸"） */
 function isoToFlag(code: string): string {
   return [...code.toUpperCase()]
     .map(c => String.fromCodePoint(c.charCodeAt(0) + 0x1F1A5))
@@ -51,32 +55,25 @@ const COUNTRY_NAMES: Record<string, string> = {
 
 function countryDisplay(code: string): string {
   const upper = code.toUpperCase()
-  const flag = isoToFlag(upper)
-  const name = COUNTRY_NAMES[upper] ?? upper
-  return `${flag} ${name}专属`
+  return `${isoToFlag(upper)} ${COUNTRY_NAMES[upper] ?? upper}专属`
 }
 
-// 兼容两种格式：
-//   普通：      {2字母}-{4字符}-{4字符}-{4字符}  e.g. OP-A3KF-9ZMR-B72X (17 chars)
-//   国家专属：  {2字母}-{2字母}-{4字符}-{4字符}  e.g. OP-US-A3KF-9ZMR   (15 chars)
 const CDK_REGEX = /^[A-Z]{2}-(?:[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}|[A-Z]{2}-[A-Z0-9]{4}-[A-Z0-9]{4})$/
 
-function pad(n: number) {
-  return String(n).padStart(2, '0')
+function pad(n: number) { return String(n).padStart(2, '0') }
+
+// ─── RegionA — CDK 输入 & 状态条 ─────────────────────────────────────────────
+// idle：完整输入表单；其余阶段：紧凑信息条（输入框锁定）
+
+interface RegionAProps {
+  phase: Phase
+  data: FlowData
+  onValidate: (patch: Partial<FlowData>) => void
+  onClear: () => void
 }
 
-const DEFAULT_DATA: FlowData = {
-  cdk: '',
-  cdkId: '',
-  service: '',
-  remaining: 0,
-  total: 0,
-  orderId: '',
-}
-
-// ─── StepInput ───────────────────────────────────────────────────────────────
-
-function StepInput({ data, goTo }: StepProps) {
+function RegionA({ phase, data, onValidate, onClear }: RegionAProps) {
+  const isIdle = phase === 'idle'
   const [inputValue, setInputValue] = useState(data.cdk)
   const [isLoading, setIsLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
@@ -93,7 +90,7 @@ function StepInput({ data, goTo }: StepProps) {
       const defaultPool = result.pools.find(p => p.isDefault && p.hasStock)
         ?? result.pools.find(p => p.hasStock)
         ?? result.pools[0]
-      goTo('confirm', {
+      onValidate({
         cdk: inputValue.trim(),
         cdkId: result.cdkId,
         service: result.service.name,
@@ -104,7 +101,7 @@ function StepInput({ data, goTo }: StepProps) {
         selectedServiceId: defaultPool?.serviceId,
       })
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : '验证失败')
+      setErrorMsg(err instanceof Error ? err.message : '验证失败，请检查兑换码')
     } finally {
       setIsLoading(false)
     }
@@ -114,72 +111,112 @@ function StepInput({ data, goTo }: StepProps) {
     if (e.key === 'Enter') handleSubmit()
   }
 
-  let borderClass = 'border-gray-300 focus:ring-blue-500 focus:border-transparent'
-  if (hasInput && isValid) borderClass = 'border-green-500 focus:ring-green-500 focus:border-transparent'
-  else if (hasInput && !isValid) borderClass = 'border-red-400 focus:ring-red-400 focus:border-transparent'
+  // ── idle：完整输入表单
+  if (isIdle) {
+    let borderClass = 'border-gray-200 focus:ring-indigo-400 focus:border-transparent'
+    if (hasInput && isValid) borderClass = 'border-green-400 focus:ring-green-400 focus:border-transparent'
+    else if (hasInput && !isValid) borderClass = 'border-red-400 focus:ring-red-400 focus:border-transparent'
 
-  return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-      <h2 className="text-xl font-semibold text-gray-900 mb-2">兑换号码</h2>
-      <p className="text-sm text-gray-500 mb-6">输入 CDK 兑换码，获取一次性接码号码</p>
+    return (
+      <div className="bg-white rounded-2xl shadow-sm p-6">
+        <h2 className="text-xl font-semibold text-gray-900 mb-1">兑换接码号码</h2>
+        <p className="text-sm text-gray-400 mb-5">输入 CDK 兑换码，自动分配手机号码并接收验证码</p>
 
-      <div className="space-y-4">
-        <div>
-          <input
-            type="text"
-            value={inputValue}
-            onChange={e => { setInputValue(e.target.value.toUpperCase()); setErrorMsg('') }}
-            onKeyDown={handleKeyDown}
-            placeholder="如 OP-XXXX-XXXX-XXXX 或 OP-US-XXXX-XXXX"
-            className={`w-full px-4 py-3 border rounded-lg text-sm focus:outline-none focus:ring-2 transition-colors font-mono tracking-wider ${borderClass}`}
-            maxLength={17}
-            disabled={isLoading}
-          />
-          {hasInput && isValid && !errorMsg && (
-            <p className="mt-1.5 text-xs text-green-600 flex items-center gap-1">
-              <span>✓</span> 格式正确
-            </p>
+        <div className="space-y-3">
+          <div>
+            <input
+              type="text"
+              value={inputValue}
+              onChange={e => { setInputValue(e.target.value.toUpperCase()); setErrorMsg('') }}
+              onKeyDown={handleKeyDown}
+              placeholder="OP-XXXX-XXXX-XXXX"
+              className={`w-full px-4 py-3 border rounded-xl text-sm focus:outline-none focus:ring-2 transition-colors font-mono tracking-wider ${borderClass}`}
+              maxLength={17}
+              disabled={isLoading}
+            />
+            {hasInput && isValid && !errorMsg && (
+              <p className="mt-1.5 text-xs text-green-600 flex items-center gap-1">
+                <span>✓</span> 格式正确
+              </p>
+            )}
+            {hasInput && !isValid && (
+              <p className="mt-1.5 text-xs text-red-500">✗ 格式不正确</p>
+            )}
+          </div>
+
+          {errorMsg && (
+            <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3">
+              <p className="text-sm text-red-600">{errorMsg}</p>
+            </div>
           )}
-          {hasInput && !isValid && (
-            <p className="mt-1.5 text-xs text-red-500 flex items-center gap-1">
-              <span>✗</span> 格式不正确
-            </p>
-          )}
+
+          <button
+            onClick={handleSubmit}
+            disabled={isLoading || !inputValue.trim()}
+            className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-200 disabled:cursor-not-allowed text-white font-medium py-3 rounded-xl text-sm transition-colors"
+          >
+            {isLoading ? '验证中...' : '立即兑换'}
+          </button>
         </div>
 
-        {errorMsg && <p className="text-sm text-red-600">{errorMsg}</p>}
-
-        <button
-          onClick={handleSubmit}
-          disabled={isLoading || !inputValue.trim()}
-          className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium py-3 rounded-lg text-sm transition-colors"
-        >
-          {isLoading ? '验证中...' : '立即兑换'}
-        </button>
+        <p className="mt-4 text-xs text-gray-300 text-center">
+          测试：
+          <button
+            onClick={() => setInputValue('OP-A3KF-9ZMR-B72X')}
+            className="font-mono text-indigo-300 hover:text-indigo-500 underline underline-offset-2 transition-colors"
+          >
+            OP-A3KF-9ZMR-B72X
+          </button>
+        </p>
       </div>
+    )
+  }
 
-      <p className="mt-6 text-xs text-gray-400 text-center">
-        测试用 CDK：
-        <button
-          onClick={() => setInputValue('OP-A3KF-9ZMR-B72X')}
-          className="font-mono text-blue-400 hover:text-blue-600 underline underline-offset-2 transition-colors"
-        >
-          OP-A3KF-9ZMR-B72X
-        </button>
-      </p>
+  // ── 会话激活：紧凑信息条
+  const dots = Array.from({ length: data.total }, (_, i) => i < data.remaining)
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm px-5 py-3.5 flex items-center justify-between gap-4">
+      <div className="flex items-center gap-3 flex-wrap min-w-0">
+        <span className="font-mono text-xs text-gray-500 bg-gray-100 px-2.5 py-1 rounded-lg tracking-wider shrink-0">
+          {data.cdk}
+        </span>
+        <span className="text-sm font-medium text-gray-700 truncate">{data.service}</span>
+        {data.countryCode && (
+          <span className="text-xs bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full border border-indigo-100 shrink-0">
+            {countryDisplay(data.countryCode)}
+          </span>
+        )}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {dots.map((active, i) => (
+            <span key={i} className={`w-2 h-2 rounded-full ${active ? 'bg-indigo-500' : 'bg-gray-200'}`} />
+          ))}
+          <span className="text-xs text-gray-400 ml-0.5">{data.remaining}/{data.total}</span>
+        </div>
+      </div>
+      <button
+        onClick={onClear}
+        className="text-xs text-gray-400 hover:text-gray-600 shrink-0 transition-colors"
+      >
+        清除
+      </button>
     </div>
   )
 }
 
-// ─── StepConfirm ─────────────────────────────────────────────────────────────
+// ─── ConfirmPanel — 运营商选择（Region B 初始内容）────────────────────────────
 
-function StepConfirm({ data, goTo }: StepProps) {
-  const { cdk, service, remaining, total, countryCode, pools = [] } = data
-  const dots = Array.from({ length: total }, (_, i) => i < remaining)
+interface ConfirmPanelProps {
+  data: FlowData
+  onConfirm: (patch: Partial<FlowData>) => void
+  onBack: () => void
+}
+
+function ConfirmPanel({ data, onConfirm, onBack }: ConfirmPanelProps) {
+  const { pools = [] } = data
   const [isLoading, setIsLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
 
-  // 默认选中：isDefault+有库存 → 任意有库存 → 第一条
   const initialId = data.selectedServiceId
     ?? pools.find(p => p.isDefault && p.hasStock)?.serviceId
     ?? pools.find(p => p.hasStock)?.serviceId
@@ -191,11 +228,12 @@ function StepConfirm({ data, goTo }: StepProps) {
     setErrorMsg('')
     try {
       const result = await cdkApi.createOrder(data.cdkId, selectedId)
-      goTo('waiting', {
+      onConfirm({
         orderId: result.orderId,
         phone: result.phoneNumber,
         expiresIn: result.expiresIn,
         secondsLeft: result.expiresIn,
+        selectedServiceId: selectedId,
       })
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : '取号失败，请重试')
@@ -205,242 +243,256 @@ function StepConfirm({ data, goTo }: StepProps) {
   }
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-6">
+    <div className="bg-white rounded-2xl shadow-sm p-6 space-y-5">
       <div>
-        <h2 className="text-xl font-semibold text-gray-900 mb-1">确认兑换</h2>
-        <p className="text-sm text-gray-500">请确认以下信息后再继续</p>
+        <h3 className="text-base font-semibold text-gray-900">选择运营商并确认取号</h3>
+        <p className="text-xs text-gray-400 mt-0.5">推荐运营商已自动选中，大多数情况下直接确认即可</p>
       </div>
 
-      {/* CDK */}
-      <div className="space-y-1">
-        <p className="text-xs text-gray-400 uppercase tracking-wide font-medium">兑换码</p>
-        <span className="inline-block font-mono text-sm bg-gray-100 text-gray-700 px-3 py-1.5 rounded-md border border-gray-200 tracking-widest">
-          {cdk}
-        </span>
-      </div>
-
-      {/* Service */}
-      <div className="space-y-1">
-        <p className="text-xs text-gray-400 uppercase tracking-wide font-medium">适用服务</p>
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-base font-semibold text-gray-800">{service}</span>
-          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium border border-blue-200">
-            接码服务
-          </span>
-          {countryCode && (
-            <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium border border-indigo-200">
-              {countryDisplay(countryCode)}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Provider selection */}
       {pools.length > 0 && (
         <div className="space-y-2">
-          <p className="text-xs text-gray-400 uppercase tracking-wide font-medium">选择运营商</p>
-          <div className="space-y-2">
-            {pools.map(pool => {
-              const isSelected = pool.serviceId === selectedId
-              const disabled = !pool.hasStock
-              return (
-                <button
-                  key={pool.serviceId}
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => !disabled && setSelectedId(pool.serviceId)}
-                  className={`w-full flex items-center justify-between px-4 py-3 rounded-lg border text-sm transition-colors ${
-                    disabled
-                      ? 'border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed'
-                      : isSelected
-                        ? 'border-blue-500 bg-blue-50 text-gray-900 ring-1 ring-blue-500'
-                        : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50'
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5">
-                    {/* 单选指示点 */}
-                    <span
-                      className={`w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center ${
-                        disabled
-                          ? 'border-gray-300'
-                          : isSelected
-                            ? 'border-blue-500 bg-blue-500'
-                            : 'border-gray-400'
-                      }`}
-                    >
-                      {isSelected && !disabled && (
-                        <span className="w-1.5 h-1.5 rounded-full bg-white" />
-                      )}
+          {pools.map(pool => {
+            const isSelected = pool.serviceId === selectedId
+            const disabled = !pool.hasStock
+            return (
+              <button
+                key={pool.serviceId}
+                type="button"
+                disabled={disabled}
+                onClick={() => !disabled && setSelectedId(pool.serviceId)}
+                className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border text-sm transition-colors ${
+                  disabled
+                    ? 'border-gray-100 bg-gray-50 text-gray-300 cursor-not-allowed'
+                    : isSelected
+                      ? 'border-indigo-400 bg-indigo-50 text-gray-900'
+                      : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <span className={`w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center ${
+                    disabled ? 'border-gray-200' : isSelected ? 'border-indigo-500 bg-indigo-500' : 'border-gray-300'
+                  }`}>
+                    {isSelected && !disabled && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                  </span>
+                  <span className="font-medium">{pool.alias}</span>
+                  {pool.isDefault && !disabled && (
+                    <span className="text-xs bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded font-medium border border-emerald-100">
+                      推荐
                     </span>
-                    <span className="font-medium">{pool.alias}</span>
-                    {pool.isDefault && !disabled && (
-                      <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-medium border border-green-200">
-                        推荐
-                      </span>
-                    )}
-                  </div>
-                  {disabled && (
-                    <span className="text-xs text-gray-400">暂无库存</span>
                   )}
-                </button>
-              )
-            })}
-          </div>
+                </div>
+                {disabled && <span className="text-xs text-gray-300">暂无库存</span>}
+              </button>
+            )
+          })}
         </div>
       )}
 
-      {/* Remaining */}
-      <div className="space-y-2">
-        <p className="text-xs text-gray-400 uppercase tracking-wide font-medium">可用次数</p>
-        <div className="flex items-center gap-3">
-          <span className="text-sm font-semibold text-gray-800">
-            {remaining} / {total} 次可用
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          {dots.map((active, i) => (
-            <span
-              key={i}
-              className={`w-3 h-3 rounded-full transition-colors ${
-                active ? 'bg-blue-500' : 'bg-gray-200'
-              }`}
-            />
-          ))}
-        </div>
-      </div>
-
-      {/* Error */}
       {errorMsg && (
-        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+        <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3">
           <p className="text-sm text-red-600">{errorMsg}</p>
         </div>
       )}
 
-      {/* Buttons */}
-      <div className="flex gap-3 pt-2">
+      <div className="flex gap-3">
         <button
-          onClick={() => goTo('input')}
-          className="flex-1 py-3 rounded-lg border border-gray-300 text-gray-600 text-sm font-medium hover:bg-gray-50 transition-colors"
+          onClick={onBack}
+          className="px-5 py-3 rounded-xl border border-gray-200 text-gray-500 text-sm font-medium hover:bg-gray-50 transition-colors"
         >
           返回
         </button>
         <button
           onClick={handleConfirm}
           disabled={isLoading || !selectedId}
-          className="flex-1 py-3 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
+          className="flex-1 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-200 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
         >
-          {isLoading ? '取号中...' : '确认兑换'}
+          {isLoading ? '取号中...' : '确认取号 →'}
         </button>
       </div>
     </div>
   )
 }
 
-// ─── StepWaiting ─────────────────────────────────────────────────────────────
+// ─── SessionPanel — 双栏会话面板（管理倒计时 + 轮询）────────────────────────
 
-function StepWaiting({ data, goTo }: StepProps) {
-  const { phone, service, expiresIn } = data
-  const [copied, setCopied] = useState(false)
-  const [seconds, setSeconds] = useState(data.secondsLeft ?? expiresIn ?? 0)
+interface SessionPanelProps {
+  phase: Phase
+  data: FlowData
+  onPhaseChange: (phase: Phase, patch?: Partial<FlowData>) => void
+}
+
+function SessionPanel({ phase, data, onPhaseChange }: SessionPanelProps) {
+  const [seconds, setSeconds] = useState(data.secondsLeft ?? data.expiresIn ?? 0)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  // 使用 ref 追踪当前秒数，供轮询回调读取
   const secondsRef = useRef(seconds)
+  const phaseRef = useRef(phase)
+  const onPhaseChangeRef = useRef(onPhaseChange)
+  const dataRef = useRef(data)
 
-  useEffect(() => {
-    secondsRef.current = seconds
-  }, [seconds])
+  useEffect(() => { secondsRef.current = seconds }, [seconds])
+  useEffect(() => { phaseRef.current = phase }, [phase])
+  useEffect(() => { onPhaseChangeRef.current = onPhaseChange }, [onPhaseChange])
+  useEffect(() => { dataRef.current = data }, [data])
 
+  // 当 retry 让 phase 回到 waiting 时，用 secondsLeft 重置计时
   useEffect(() => {
+    if (phase === 'waiting' && data.secondsLeft !== undefined) {
+      setSeconds(data.secondsLeft)
+      secondsRef.current = data.secondsLeft
+    }
+  }, [phase]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── 倒计时（waiting + received 阶段）
+  useEffect(() => {
+    if (phase !== 'waiting' && phase !== 'received') return
+
+    if (timerRef.current) clearInterval(timerRef.current)
+
     timerRef.current = setInterval(() => {
       setSeconds(prev => {
         if (prev <= 1) {
           clearInterval(timerRef.current!)
-          goTo('timeout')
+          if (phaseRef.current === 'waiting') {
+            onPhaseChangeRef.current('timeout')
+          } else if (phaseRef.current === 'received') {
+            // 倒计时归零：后台静默完成
+            const orderId = dataRef.current.orderId
+            cdkApi.finishOrder(orderId).catch(() => {}).finally(() => {
+              onPhaseChangeRef.current('success')
+            })
+          }
           return 0
         }
         return prev - 1
       })
     }, 1000)
 
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current)
-    }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+    return () => { if (timerRef.current) clearInterval(timerRef.current) }
+  }, [phase]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── 轮询（仅 waiting 阶段）
   useEffect(() => {
+    if (phase !== 'waiting') return
+
+    const orderId = data.orderId
     const interval = setInterval(async () => {
       try {
-        const result = await cdkApi.pollOrder(data.orderId)
+        const result = await cdkApi.pollOrder(orderId)
         if (result.status === 'received') {
           clearInterval(interval)
-          if (timerRef.current) clearInterval(timerRef.current)
-          goTo('received', {
+          const d = dataRef.current
+          const newRecord: SmsRecord = {
+            code: result.verificationCode ?? '',
+            sms: result.smsContent ?? '',
+            receivedAt: new Date().toISOString(),
+          }
+          onPhaseChangeRef.current('received', {
             sms: result.smsContent ?? '',
             code: result.verificationCode ?? '',
             canRetry: result.canRetry ?? false,
             secondsLeft: secondsRef.current,
+            remaining: Math.max(0, d.remaining - 1),
+            smsHistory: [newRecord, ...d.smsHistory],
           })
         } else if (result.status === 'completed') {
           clearInterval(interval)
           if (timerRef.current) clearInterval(timerRef.current)
-          goTo('success', {
+          onPhaseChangeRef.current('success', {
             sms: result.smsContent ?? '',
             code: result.verificationCode ?? '',
           })
         } else if (result.status === 'expired' || result.status === 'cancelled') {
           clearInterval(interval)
           if (timerRef.current) clearInterval(timerRef.current)
-          goTo('timeout')
+          onPhaseChangeRef.current('timeout')
         }
-        // pending: 继续等待
       } catch {
         // 网络错误不中断，继续下次轮询
       }
     }, 5000)
-    return () => clearInterval(interval)
-  }, [data.orderId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const minutes = Math.floor(seconds / 60)
-  const secs = seconds % 60
+    return () => clearInterval(interval)
+  }, [phase, data.orderId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function stopTimer() {
+    if (timerRef.current) clearInterval(timerRef.current)
+  }
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <PhoneCard
+        phase={phase}
+        data={data}
+        seconds={seconds}
+        onPhaseChange={onPhaseChange}
+      />
+      <CodeCard
+        phase={phase}
+        data={data}
+        seconds={seconds}
+        onPhaseChange={onPhaseChange}
+        stopTimer={stopTimer}
+      />
+    </div>
+  )
+}
+
+// ─── PhoneCard — 左栏：号码信息 & 状态 ───────────────────────────────────────
+
+interface CardProps {
+  phase: Phase
+  data: FlowData
+  seconds: number
+  onPhaseChange: (phase: Phase, patch?: Partial<FlowData>) => void
+  stopTimer?: () => void
+}
+
+function PhoneCard({ phase, data, seconds, onPhaseChange }: CardProps) {
+  const [copied, setCopied] = useState(false)
 
   function handleCopy() {
-    navigator.clipboard.writeText(phone ?? '').then(() => {
+    navigator.clipboard.writeText(data.phone ?? '').then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     })
   }
 
-  function handleSimulate() {
-    if (timerRef.current) clearInterval(timerRef.current)
-    goTo('received', {
-      sms: 'Your OpenAI verification code is 847291. Do not share it.',
-      code: '847291',
-      canRetry: true,
-      secondsLeft: seconds,
-    })
-  }
+  const isActive = phase === 'waiting' || phase === 'received'
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-6">
-      {/* Header */}
-      <div>
-        <p className="text-xs text-gray-400 uppercase tracking-wide font-medium mb-1">服务</p>
-        <h2 className="text-xl font-semibold text-gray-900">{service}</h2>
+    <div className="bg-white rounded-2xl shadow-sm p-5 flex flex-col gap-4">
+
+      {/* 监测状态指示器 */}
+      <div className="flex items-center gap-2">
+        {isActive ? (
+          <>
+            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse shrink-0" />
+            <span className="text-xs text-green-600 font-medium">正在监测 {data.service} 短信</span>
+          </>
+        ) : phase === 'timeout' ? (
+          <>
+            <span className="w-2 h-2 rounded-full bg-orange-400 shrink-0" />
+            <span className="text-xs text-orange-500 font-medium">等待超时</span>
+          </>
+        ) : (
+          <>
+            <span className="w-2 h-2 rounded-full bg-indigo-400 shrink-0" />
+            <span className="text-xs text-indigo-600 font-medium">已完成</span>
+          </>
+        )}
       </div>
 
-      {/* Phone */}
-      <div className="space-y-1">
-        <p className="text-xs text-gray-400 uppercase tracking-wide font-medium">分配的号码</p>
-        <div className="flex items-center gap-3">
-          <span className="text-2xl font-mono font-semibold text-gray-900 tracking-wider">
-            {phone}
-          </span>
+      {/* 手机号码 */}
+      <div>
+        <p className="text-xs text-gray-400 mb-1.5">分配的手机号码</p>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-2xl font-mono font-bold text-gray-900 tracking-wide">{data.phone}</span>
           <button
             onClick={handleCopy}
-            className={`text-xs px-2.5 py-1 rounded-md border transition-colors font-medium ${
+            className={`text-xs px-2.5 py-1 rounded-lg border font-medium transition-colors ${
               copied
-                ? 'bg-green-50 border-green-300 text-green-600'
-                : 'bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100'
+                ? 'bg-green-50 border-green-200 text-green-600'
+                : 'bg-gray-50 border-gray-200 text-gray-400 hover:text-gray-600'
             }`}
           >
             {copied ? '已复制 ✓' : '复制'}
@@ -448,494 +500,301 @@ function StepWaiting({ data, goTo }: StepProps) {
         </div>
       </div>
 
-      {/* Countdown */}
-      <div className="flex items-center gap-3 bg-orange-50 border border-orange-200 rounded-lg px-4 py-3">
-        <span className="text-orange-500 text-lg">🕐</span>
-        <div>
-          <p className="text-xs text-orange-600 font-medium">剩余时间</p>
-          <p className="text-2xl font-mono font-bold text-orange-500 tabular-nums">
-            {pad(minutes)}:{pad(secs)}
-          </p>
+      {/* 状态徽标 */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-xs bg-indigo-50 text-indigo-500 px-2 py-0.5 rounded-full border border-indigo-100">
+          验证码: {data.smsHistory.length}/{data.total}次
+        </span>
+        <span className="text-xs bg-gray-50 text-gray-400 px-2 py-0.5 rounded-full border border-gray-100">
+          换号: {data.changeCount}/2次
+        </span>
+      </div>
+
+      {/* 倒计时（waiting 阶段显示在左栏） */}
+      {phase === 'waiting' && seconds > 0 && (
+        <div className="flex items-center gap-2 text-orange-500">
+          <span className="text-sm shrink-0">⏱</span>
+          <span className="font-mono font-semibold tabular-nums text-sm">
+            {pad(Math.floor(seconds / 60))}:{pad(seconds % 60)}
+          </span>
+          <span className="text-xs text-gray-400">后超时</span>
         </div>
-      </div>
+      )}
 
-      {/* Loading animation */}
-      <div className="flex items-center gap-3">
-        <svg
-          className="animate-spin h-5 w-5 text-blue-500 flex-shrink-0"
-          xmlns="http://www.w3.org/2000/svg"
-          fill="none"
-          viewBox="0 0 24 24"
-        >
-          <circle
-            className="opacity-25"
-            cx="12"
-            cy="12"
-            r="10"
-            stroke="currentColor"
-            strokeWidth="4"
-          />
-          <path
-            className="opacity-75"
-            fill="currentColor"
-            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-          />
-        </svg>
-        <span className="text-sm text-gray-600">等待短信中...</span>
-      </div>
+      <div className="flex-1" />
 
-      {/* Steps */}
-      <div className="space-y-3">
-        <p className="text-xs text-gray-400 uppercase tracking-wide font-medium">接码进度</p>
-        <div className="space-y-2">
-          <div className="flex items-center gap-3">
-            <span className="text-base">✅</span>
-            <span className="text-sm text-gray-700">号码已分配</span>
-          </div>
-          <div className="ml-[11px] w-px h-4 bg-gray-200" />
-          <div className="flex items-center gap-3">
-            <span className="text-base">⏳</span>
-            <span className="text-sm font-semibold text-blue-600">等待短信</span>
-            <span className="text-xs bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded font-medium">
-              当前
-            </span>
-          </div>
-          <div className="ml-[11px] w-px h-4 bg-gray-200" />
-          <div className="flex items-center gap-3">
-            <span className="w-5 h-5 rounded-full border-2 border-gray-300 flex-shrink-0" />
-            <span className="text-sm text-gray-400">接收完成</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Simulate button */}
-      <div className="pt-2 border-t border-gray-100">
+      {/* 超时：重新取号 */}
+      {phase === 'timeout' && (
         <button
-          onClick={handleSimulate}
-          className="w-full py-2.5 rounded-lg border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-500 text-xs font-medium transition-colors"
+          onClick={() => onPhaseChange('confirm')}
+          className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium transition-colors"
         >
-          模拟收到短信（测试）
+          重新取号
         </button>
-      </div>
+      )}
+
+      {/* 完成：再次取号 */}
+      {phase === 'success' && (
+        <button
+          onClick={() => onPhaseChange('confirm')}
+          className="w-full py-2.5 rounded-xl border border-indigo-200 text-indigo-600 text-sm font-medium hover:bg-indigo-50 transition-colors"
+        >
+          再次取号
+        </button>
+      )}
     </div>
   )
 }
 
-// ─── StepReceived ─────────────────────────────────────────────────────────────
-// 已收到短信：显示验证码
-// canRetry=false：显示【再次兑换】，点击静默 finish + 回到 input；倒计时后台兜底不展示
-// canRetry=true ：显示倒计时 + 【再发一条】+ 【完成】；倒计时归零自动 finish
+// ─── CodeCard — 右栏：验证码展示 & 操作 ──────────────────────────────────────
 
-function StepReceived({ data, goTo }: StepProps) {
-  const { phone, service, sms, code, canRetry, orderId } = data
+function CodeCard({ phase, data, seconds, onPhaseChange, stopTimer }: CardProps) {
   const [codeCopied, setCodeCopied] = useState(false)
   const [isRetrying, setIsRetrying] = useState(false)
   const [isFinishing, setIsFinishing] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
-  const [seconds, setSeconds] = useState(data.secondsLeft ?? 0)
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  useEffect(() => {
-    if (seconds <= 0) return
-    timerRef.current = setInterval(() => {
-      setSeconds(prev => {
-        if (prev <= 1) {
-          clearInterval(timerRef.current!)
-          // 倒计时归零自动完成
-          handleFinish()
-          return 0
-        }
-        return prev - 1
-      })
-    }, 1000)
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current)
-    }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  function stopTimer() {
-    if (timerRef.current) clearInterval(timerRef.current)
-  }
 
   function handleCopyCode() {
-    navigator.clipboard.writeText(code ?? '').then(() => {
+    navigator.clipboard.writeText(data.code ?? '').then(() => {
       setCodeCopied(true)
       setTimeout(() => setCodeCopied(false), 2000)
     })
   }
 
-  async function handleRetryExchange() {
-    if (!orderId) return
-    setIsFinishing(true)
-    setErrorMsg('')
-    stopTimer()
-    try {
-      await cdkApi.finishOrder(orderId)
-    } catch {
-      // finish 失败时倒计时兜底，不阻塞用户继续兑换
-    }
-    goTo('input', { ...DEFAULT_DATA })
-  }
-
   async function handleRetry() {
-    if (!orderId) return
+    if (!data.orderId) return
     setIsRetrying(true)
     setErrorMsg('')
-    stopTimer()
+    stopTimer?.()
     try {
-      await cdkApi.retryOrder(orderId)
-      // 回到 waiting 步骤继续轮询（倒计时从当前剩余秒数继续）
-      goTo('waiting', { secondsLeft: seconds })
+      await cdkApi.retryOrder(data.orderId)
+      onPhaseChange('waiting', { secondsLeft: seconds })
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : '再发失败，请重试')
-      // 失败则重启倒计时
       setIsRetrying(false)
     }
   }
 
   async function handleFinish() {
-    if (!orderId) return
+    if (!data.orderId) return
     setIsFinishing(true)
     setErrorMsg('')
-    stopTimer()
+    stopTimer?.()
     try {
-      await cdkApi.finishOrder(orderId)
-      goTo('success')
+      await cdkApi.finishOrder(data.orderId)
+      onPhaseChange('success')
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : '完成失败，请重试')
       setIsFinishing(false)
     }
   }
 
-  const minutes = Math.floor(seconds / 60)
-  const secs = seconds % 60
-
-  return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-6">
-      {/* Header */}
-      <div className="flex flex-col items-center text-center py-2">
-        <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center mb-3">
-          <svg
-            className="w-7 h-7 text-green-500"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2.5}
-            viewBox="0 0 24 24"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-          </svg>
-        </div>
-        <h2 className="text-xl font-semibold text-gray-900">已收到短信</h2>
-        <p className="text-sm text-gray-500 mt-1">{service} 验证码已接收</p>
-      </div>
-
-      {/* Phone */}
-      <div className="space-y-1">
-        <p className="text-xs text-gray-400 uppercase tracking-wide font-medium">接码号码</p>
-        <p className="text-sm font-mono text-gray-500">{phone}</p>
-      </div>
-
-      {/* SMS content */}
-      <div className="space-y-1.5">
-        <p className="text-xs text-gray-400 uppercase tracking-wide font-medium">短信内容</p>
-        <div className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3">
-          <p className="text-sm text-gray-700 leading-relaxed">{sms}</p>
-        </div>
-      </div>
-
-      {/* Verification code */}
-      <div className="space-y-2">
-        <p className="text-xs text-gray-400 uppercase tracking-wide font-medium">验证码</p>
-        <div className="flex items-center gap-3">
-          <div className="flex-1 bg-blue-600 rounded-lg px-5 py-3 flex items-center justify-center">
-            <span className="text-3xl font-mono font-bold text-white tracking-[0.25em]">
-              {code}
-            </span>
-          </div>
-          <button
-            onClick={handleCopyCode}
-            className={`flex-shrink-0 px-4 py-3 rounded-lg border text-sm font-medium transition-colors ${
-              codeCopied
-                ? 'bg-green-50 border-green-300 text-green-600'
-                : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
-            }`}
-          >
-            {codeCopied ? '已复制 ✓' : '复制验证码'}
-          </button>
-        </div>
-      </div>
-
-      {/* Countdown — 仅 canRetry=true 时显示 */}
-      {canRetry && seconds > 0 && (
-        <div className="flex items-center gap-3 bg-orange-50 border border-orange-200 rounded-lg px-4 py-3">
-          <span className="text-orange-500 text-lg">🕐</span>
-          <div className="flex-1">
-            <p className="text-xs text-orange-600 font-medium">激活剩余时间</p>
-            <p className="text-lg font-mono font-bold text-orange-500 tabular-nums">
-              {pad(minutes)}:{pad(secs)}
-            </p>
-          </div>
-          <p className="text-xs text-orange-500">到期自动完成</p>
-        </div>
-      )}
-
-      {/* Error */}
-      {errorMsg && (
-        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3">
-          <p className="text-sm text-red-600">{errorMsg}</p>
-        </div>
-      )}
-
-      {/* Action buttons */}
-      <div className="flex gap-3 pt-2">
-        {canRetry ? (
-          <>
-            <button
-              onClick={handleRetry}
-              disabled={isRetrying || isFinishing}
-              className="flex-1 py-3 rounded-lg border border-blue-300 text-blue-600 text-sm font-medium hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              {isRetrying ? '请求中...' : '再发一条'}
-            </button>
-            <button
-              onClick={handleFinish}
-              disabled={isRetrying || isFinishing}
-              className="flex-1 py-3 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
-            >
-              {isFinishing ? '完成中...' : '完成'}
-            </button>
-          </>
-        ) : (
-          <button
-            onClick={handleRetryExchange}
-            disabled={isFinishing}
-            className="w-full py-3 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
-          >
-            {isFinishing ? '处理中...' : '再次兑换'}
-          </button>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ─── StepSuccess ─────────────────────────────────────────────────────────────
-
-function StepSuccess({ data, goTo }: StepProps) {
-  const { phone, service, sms, code } = data
-  const [copied, setCopied] = useState(false)
-
-  function handleCopyCode() {
-    navigator.clipboard.writeText(code ?? '').then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    })
+  async function handleRetryExchange() {
+    if (!data.orderId) return
+    setIsFinishing(true)
+    stopTimer?.()
+    try { await cdkApi.finishOrder(data.orderId) } catch { /* 静默忽略 */ }
+    onPhaseChange('idle', { ...DEFAULT_DATA })
   }
 
-  return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-6">
-      {/* Success header */}
-      <div className="flex flex-col items-center text-center py-2">
-        <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center mb-3">
-          <svg
-            className="w-7 h-7 text-green-500"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2.5}
-            viewBox="0 0 24 24"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+  // ── waiting：等待动画
+  if (phase === 'waiting') {
+    return (
+      <div className="bg-white rounded-2xl shadow-sm p-5 flex flex-col items-center justify-center min-h-[220px] gap-4">
+        <div className="w-14 h-14 rounded-full bg-indigo-50 flex items-center justify-center">
+          <svg className="animate-spin w-6 h-6 text-indigo-500" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
           </svg>
         </div>
-        <h2 className="text-xl font-semibold text-gray-900">兑换完成</h2>
-        <p className="text-sm text-gray-500 mt-1">{service} 验证码已成功获取</p>
-      </div>
-
-      {/* Phone */}
-      <div className="space-y-1">
-        <p className="text-xs text-gray-400 uppercase tracking-wide font-medium">接码号码</p>
-        <p className="text-sm font-mono text-gray-500">{phone}</p>
-      </div>
-
-      {/* SMS content */}
-      {sms && (
-        <div className="space-y-1.5">
-          <p className="text-xs text-gray-400 uppercase tracking-wide font-medium">短信内容</p>
-          <div className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3">
-            <p className="text-sm text-gray-700 leading-relaxed">{sms}</p>
-          </div>
+        <div className="text-center">
+          <p className="text-sm font-medium text-gray-700">等待验证码...</p>
+          <p className="text-xs text-gray-400 mt-0.5">每 5 秒自动检测一次</p>
         </div>
-      )}
+        {seconds > 0 && (
+          <div className="text-center">
+            <p className="text-3xl font-mono font-bold text-orange-500 tabular-nums">
+              {pad(Math.floor(seconds / 60))}:{pad(seconds % 60)}
+            </p>
+            <p className="text-xs text-gray-400 mt-0.5">剩余等待时间</p>
+          </div>
+        )}
+      </div>
+    )
+  }
 
-      {/* Verification code */}
-      {code && (
-        <div className="space-y-2">
-          <p className="text-xs text-gray-400 uppercase tracking-wide font-medium">验证码</p>
-          <div className="flex items-center gap-3">
-            <div className="flex-1 bg-blue-600 rounded-lg px-5 py-3 flex items-center justify-center">
-              <span className="text-3xl font-mono font-bold text-white tracking-[0.25em]">
-                {code}
-              </span>
-            </div>
+  // ── received：显示验证码
+  if (phase === 'received') {
+    return (
+      <div className="bg-white rounded-2xl shadow-sm p-5 flex flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-gray-400 font-medium">验证码</p>
+          {data.canRetry && seconds > 0 && (
+            <span className="text-xs text-orange-500 font-mono tabular-nums">
+              {pad(Math.floor(seconds / 60))}:{pad(seconds % 60)}
+            </span>
+          )}
+        </div>
+
+        {/* 大号验证码 */}
+        <div className="bg-indigo-50 rounded-xl px-5 py-4 flex items-center justify-between gap-3">
+          <span className="text-4xl font-mono font-bold text-indigo-600 tracking-[0.2em]">
+            {data.code}
+          </span>
+          <button
+            onClick={handleCopyCode}
+            className={`shrink-0 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+              codeCopied
+                ? 'bg-green-100 text-green-600'
+                : 'bg-white text-gray-500 hover:text-gray-700 shadow-sm border border-gray-100'
+            }`}
+          >
+            {codeCopied ? '已复制 ✓' : '复制'}
+          </button>
+        </div>
+
+        {/* 原始短信 */}
+        {data.sms && (
+          <div className="bg-gray-50 rounded-xl px-4 py-3">
+            <p className="text-xs text-gray-400 mb-0.5">原始短信</p>
+            <p className="text-xs text-gray-600 leading-relaxed">{data.sms}</p>
+          </div>
+        )}
+
+        {/* 错误提示 */}
+        {errorMsg && (
+          <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3">
+            <p className="text-xs text-red-600">{errorMsg}</p>
+          </div>
+        )}
+
+        <div className="flex-1" />
+
+        {/* 操作按钮 */}
+        <div className="flex gap-2">
+          {data.canRetry ? (
+            <>
+              <button
+                onClick={handleRetry}
+                disabled={isRetrying || isFinishing}
+                className="flex-1 py-2.5 rounded-xl border border-indigo-200 text-indigo-600 text-sm font-medium hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {isRetrying
+                  ? '请求中...'
+                  : data.remaining > 0
+                    ? `再发一条（剩 ${data.remaining} 次）`
+                    : '再发一条'}
+              </button>
+              <button
+                onClick={handleFinish}
+                disabled={isRetrying || isFinishing}
+                className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-200 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
+              >
+                {isFinishing ? '完成中...' : '完成'}
+              </button>
+            </>
+          ) : (
             <button
-              onClick={handleCopyCode}
-              className={`flex-shrink-0 px-4 py-3 rounded-lg border text-sm font-medium transition-colors ${
-                copied
-                  ? 'bg-green-50 border-green-300 text-green-600'
-                  : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
-              }`}
+              onClick={handleRetryExchange}
+              disabled={isFinishing}
+              className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-200 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
             >
-              {copied ? '已复制 ✓' : '复制验证码'}
+              {isFinishing ? '处理中...' : '再次兑换'}
             </button>
-          </div>
+          )}
         </div>
-      )}
-
-      {/* Action */}
-      <div className="pt-2">
-        <button
-          onClick={() => goTo('input', { ...DEFAULT_DATA })}
-          className="w-full py-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors"
-        >
-          再兑换一次
-        </button>
       </div>
-    </div>
-  )
-}
+    )
+  }
 
-// ─── StepTimeout ─────────────────────────────────────────────────────────────
-
-function StepTimeout({ data, goTo }: StepProps) {
-  const { cdk, remaining, total } = data
-  const dots = Array.from({ length: total }, (_, i) => i < remaining)
-
-  return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-6">
-      {/* Header */}
-      <div className="flex flex-col items-center text-center py-2">
-        <div className="w-14 h-14 rounded-full bg-orange-100 flex items-center justify-center mb-3">
-          <span className="text-2xl">🕐</span>
+  // ── success：展示最终验证码（只读）
+  if (phase === 'success') {
+    return (
+      <div className="bg-white rounded-2xl shadow-sm p-5 flex flex-col gap-4">
+        <div className="flex items-center gap-2">
+          <div className="w-5 h-5 rounded-full bg-green-100 flex items-center justify-center shrink-0">
+            <svg className="w-3 h-3 text-green-500" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <p className="text-sm font-medium text-gray-700">兑换完成</p>
         </div>
-        <h2 className="text-xl font-semibold text-gray-900">号码已超时</h2>
-        <p className="text-sm text-gray-500 mt-2 leading-relaxed max-w-xs">
-          未在有效时间内收到短信，CDK 次数不会被消耗。
+
+        {data.code && (
+          <>
+            <div className="bg-indigo-50 rounded-xl px-5 py-4 flex items-center justify-between gap-3">
+              <span className="text-4xl font-mono font-bold text-indigo-600 tracking-[0.2em]">
+                {data.code}
+              </span>
+              <button
+                onClick={() => navigator.clipboard.writeText(data.code ?? '')}
+                className="shrink-0 px-3 py-2 rounded-lg text-sm font-medium bg-white text-gray-500 hover:text-gray-700 shadow-sm border border-gray-100 transition-colors"
+              >
+                复制
+              </button>
+            </div>
+            {data.sms && (
+              <div className="bg-gray-50 rounded-xl px-4 py-3">
+                <p className="text-xs text-gray-400 mb-0.5">原始短信</p>
+                <p className="text-xs text-gray-600 leading-relaxed">{data.sms}</p>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    )
+  }
+
+  // ── timeout：超时提示
+  if (phase === 'timeout') {
+    return (
+      <div className="bg-white rounded-2xl shadow-sm p-5 flex flex-col items-center justify-center min-h-[220px] gap-3">
+        <div className="w-14 h-14 rounded-full bg-orange-50 flex items-center justify-center text-2xl">
+          ⏱
+        </div>
+        <p className="text-sm font-medium text-gray-700">等待超时</p>
+        <p className="text-xs text-gray-400 text-center leading-relaxed max-w-[200px]">
+          未在有效时间内收到短信，CDK 次数不会被消耗
         </p>
       </div>
+    )
+  }
 
-      {/* CDK info */}
-      <div className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-4 space-y-3">
-        <div className="space-y-1">
-          <p className="text-xs text-gray-400 uppercase tracking-wide font-medium">兑换码</p>
-          <span className="font-mono text-sm text-gray-700 tracking-widest">{cdk}</span>
-        </div>
-        <div className="space-y-1">
-          <p className="text-xs text-gray-400 uppercase tracking-wide font-medium">剩余次数</p>
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-semibold text-gray-800">
-              {remaining} / {total} 次可用
-            </span>
-            <div className="flex items-center gap-1.5">
-              {dots.map((active, i) => (
-                <span
-                  key={i}
-                  className={`w-2.5 h-2.5 rounded-full ${
-                    active ? 'bg-blue-500' : 'bg-gray-200'
-                  }`}
-                />
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Buttons */}
-      <div className="flex gap-3 pt-2">
-        <button
-          onClick={() => goTo('input')}
-          className="flex-1 py-3 rounded-lg border border-gray-300 text-gray-600 text-sm font-medium hover:bg-gray-50 transition-colors"
-        >
-          返回首页
-        </button>
-        <button
-          onClick={() => goTo('confirm')}
-          className="flex-1 py-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors"
-        >
-          重新获取号码
-        </button>
-      </div>
-    </div>
-  )
+  return null
 }
 
-// ─── StepError ───────────────────────────────────────────────────────────────
+// ─── RegionC — 接收历史 ───────────────────────────────────────────────────────
 
-const ERROR_CONFIG: Record<string, { title: string; description: string }> = {
-  invalid: {
-    title: 'CDK 无效',
-    description: '请检查兑换码是否正确',
-  },
-  exhausted: {
-    title: 'CDK 已用完',
-    description: '该兑换码的可用次数已耗尽',
-  },
-  unknown: {
-    title: '出现错误',
-    description: '请稍后重试',
-  },
-}
-
-function StepError({ data, goTo }: StepProps) {
-  const type = data.errorType ?? 'unknown'
-  const config = ERROR_CONFIG[type] ?? ERROR_CONFIG.unknown
-
+function RegionC({ history }: { history: SmsRecord[] }) {
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-6">
-      {/* Header */}
-      <div className="flex flex-col items-center text-center py-2">
-        <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center mb-3">
-          <svg
-            className="w-7 h-7 text-red-500"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2.5}
-            viewBox="0 0 24 24"
+    <div className="bg-white rounded-2xl shadow-sm p-5">
+      <h3 className="text-sm font-semibold text-gray-700 mb-3">接收记录</h3>
+      <div>
+        {history.map((record, i) => (
+          <div
+            key={i}
+            className={`flex items-start gap-4 py-3 ${i < history.length - 1 ? 'border-b border-gray-50' : ''}`}
           >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </div>
-        <h2 className="text-xl font-semibold text-gray-900">{config.title}</h2>
-        <p className="text-sm text-gray-500 mt-2">{config.description}</p>
-      </div>
-
-      {/* Error type badge */}
-      <div className="flex justify-center">
-        <span className="text-xs bg-red-50 text-red-500 border border-red-200 px-3 py-1 rounded-full font-medium">
-          错误代码：{type}
-        </span>
-      </div>
-
-      {/* Action */}
-      <div className="pt-2">
-        <button
-          onClick={() => goTo('input')}
-          className="w-full py-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors"
-        >
-          返回首页
-        </button>
+            <span className="text-sm font-mono font-bold text-indigo-600 w-16 shrink-0">{record.code}</span>
+            <span className="text-xs text-gray-500 flex-1 leading-relaxed">{record.sms}</span>
+            <span className="text-xs text-gray-300 shrink-0 tabular-nums">
+              {new Date(record.receivedAt).toLocaleTimeString()}
+            </span>
+          </div>
+        ))}
       </div>
     </div>
   )
 }
 
-// ─── MockPanel (仅开发模式渲染) ──────────────────────────────────────────────
+// ─── MockPanel（仅开发模式渲染）──────────────────────────────────────────────
 
 const SCENARIOS: { value: MockScenario; label: string; desc: string }[] = [
   { value: 'received',    label: 'received',    desc: 'waiting → received（主路径）' },
-  { value: 'completed',   label: 'completed',   desc: 'waiting → success 直达（SMSPool）' },
+  { value: 'completed',   label: 'completed',   desc: 'waiting → success 直达' },
   { value: 'timeout',     label: 'timeout',     desc: 'waiting → timeout' },
   { value: 'create_fail', label: 'create_fail', desc: 'confirm 页取号失败' },
-  { value: 'retry_fail',  label: 'retry_fail',  desc: 'received 页再发一条失败' },
+  { value: 'retry_fail',  label: 'retry_fail',  desc: 'received 页再发失败' },
   { value: 'finish_fail', label: 'finish_fail', desc: 'received 页完成失败' },
 ]
 
@@ -946,7 +805,6 @@ function MockPanel() {
   const [delaySec, setDelaySec] = useState(3)
   const [canRetry, setCanRetry] = useState(true)
 
-  // 同步到 mockConfig（模块级对象，api.ts 读取）
   useEffect(() => {
     mockConfig.enabled = enabled
     mockConfig.scenario = scenario
@@ -970,38 +828,24 @@ function MockPanel() {
 
   return (
     <div className="fixed bottom-4 right-4 w-72 bg-white rounded-xl shadow-xl border border-gray-200 z-50 overflow-hidden">
-      {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-200">
         <span className="text-sm font-semibold text-gray-700">🧪 Mock 控制台</span>
-        <button
-          onClick={() => setOpen(false)}
-          className="text-gray-400 hover:text-gray-600 text-lg leading-none"
-        >
-          ×
-        </button>
+        <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">×</button>
       </div>
 
       <div className="p-4 space-y-4">
-        {/* 开关 */}
         <div className="flex items-center justify-between">
           <span className="text-sm font-medium text-gray-700">Mock 模式</span>
           <button
             onClick={() => setEnabled(v => !v)}
-            className={`relative w-11 h-6 rounded-full transition-colors ${
-              enabled ? 'bg-amber-400' : 'bg-gray-300'
-            }`}
+            className={`relative w-11 h-6 rounded-full transition-colors ${enabled ? 'bg-amber-400' : 'bg-gray-300'}`}
           >
-            <span
-              className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
-                enabled ? 'translate-x-5' : 'translate-x-0.5'
-              }`}
-            />
+            <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${enabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
           </button>
         </div>
 
         {enabled && (
           <>
-            {/* 场景选择 */}
             <div className="space-y-1.5">
               <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">场景</p>
               <div className="space-y-1">
@@ -1022,7 +866,6 @@ function MockPanel() {
               </div>
             </div>
 
-            {/* 延迟（仅非 create_fail 场景有意义） */}
             {scenario !== 'create_fail' && (
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
@@ -1030,31 +873,21 @@ function MockPanel() {
                   <span className="text-xs font-mono text-gray-700">{delaySec}s</span>
                 </div>
                 <input
-                  type="range"
-                  min={1}
-                  max={15}
-                  value={delaySec}
+                  type="range" min={1} max={15} value={delaySec}
                   onChange={e => setDelaySec(Number(e.target.value))}
                   className="w-full accent-amber-400"
                 />
               </div>
             )}
 
-            {/* canRetry（仅 received 场景有意义） */}
             {scenario === 'received' && (
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">canRetry</span>
                 <button
                   onClick={() => setCanRetry(v => !v)}
-                  className={`relative w-11 h-6 rounded-full transition-colors ${
-                    canRetry ? 'bg-blue-500' : 'bg-gray-300'
-                  }`}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${canRetry ? 'bg-indigo-500' : 'bg-gray-300'}`}
                 >
-                  <span
-                    className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
-                      canRetry ? 'translate-x-5' : 'translate-x-0.5'
-                    }`}
-                  />
+                  <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${canRetry ? 'translate-x-5' : 'translate-x-0.5'}`} />
                 </button>
               </div>
             )}
@@ -1065,27 +898,58 @@ function MockPanel() {
   )
 }
 
-// ─── Home (步骤状态管理器) ────────────────────────────────────────────────────
+// ─── Home — 页面状态管理器 ────────────────────────────────────────────────────
 
 export default function Home() {
-  const [step, setStep] = useState<Step>('input')
+  const [phase, setPhase] = useState<Phase>('idle')
   const [data, setData] = useState<FlowData>(DEFAULT_DATA)
 
-  const goTo: GoTo = (nextStep, patch) => {
+  function updatePhase(newPhase: Phase, patch?: Partial<FlowData>) {
     if (patch) setData(prev => ({ ...prev, ...patch }))
-    setStep(nextStep)
+    setPhase(newPhase)
   }
 
+  function handleClear() {
+    setPhase('idle')
+    setData(DEFAULT_DATA)
+  }
+
+  const showSession = phase === 'waiting' || phase === 'received' || phase === 'success' || phase === 'timeout'
+
   return (
-    <>
-      {step === 'input'    && <StepInput    data={data} goTo={goTo} />}
-      {step === 'confirm'  && <StepConfirm  data={data} goTo={goTo} />}
-      {step === 'waiting'  && <StepWaiting  data={data} goTo={goTo} />}
-      {step === 'received' && <StepReceived data={data} goTo={goTo} />}
-      {step === 'success'  && <StepSuccess  data={data} goTo={goTo} />}
-      {step === 'timeout'  && <StepTimeout  data={data} goTo={goTo} />}
-      {step === 'error'    && <StepError    data={data} goTo={goTo} />}
+    <div className="space-y-4">
+      {/* 区域 A：CDK 输入 & 状态条 */}
+      <RegionA
+        phase={phase}
+        data={data}
+        onValidate={patch => updatePhase('confirm', patch)}
+        onClear={handleClear}
+      />
+
+      {/* 区域 B：运营商选择（confirm 阶段）*/}
+      {phase === 'confirm' && (
+        <ConfirmPanel
+          data={data}
+          onConfirm={patch => updatePhase('waiting', patch)}
+          onBack={() => updatePhase('idle')}
+        />
+      )}
+
+      {/* 区域 B：双栏会话面板（waiting / received / success / timeout）*/}
+      {showSession && (
+        <SessionPanel
+          phase={phase}
+          data={data}
+          onPhaseChange={updatePhase}
+        />
+      )}
+
+      {/* 区域 C：接收历史（收到第一条短信后展开）*/}
+      {data.smsHistory.length > 0 && (
+        <RegionC history={data.smsHistory} />
+      )}
+
       {import.meta.env.DEV && <MockPanel />}
-    </>
+    </div>
   )
 }

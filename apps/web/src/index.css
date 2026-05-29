@@ -1,1 +1,18 @@
 @import "tailwindcss";
+
+/*
+  主题色配置
+  修改下方 CSS 变量可全局更换主题色，无需批量替换组件代码。
+  当前主题：Indigo (#4F46E5)
+*/
+:root {
+  --primary:       #4F46E5; /* indigo-600 */
+  --primary-dark:  #4338CA; /* indigo-700 */
+  --primary-light: #EEF2FF; /* indigo-50  */
+}
+
+.dark {
+  --primary:       #818CF8; /* indigo-400 */
+  --primary-dark:  #6366F1; /* indigo-500 */
+  --primary-light: #1E1B4B;
+}

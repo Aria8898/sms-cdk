@@ -6,7 +6,13 @@
       "Bash(npx tsc *)",
       "Bash(node_modules/.bin/tsc --noEmit -p apps/api/tsconfig.json)",
       "Bash(node_modules/.bin/tsc --noEmit)",
-      "Bash(ls *)"
+      "Bash(ls *)",
+      "Bash(pnpm --filter web dev)",
+      "Bash(curl -s http://localhost:5173)",
+      "Bash(curl -s http://localhost:5175)",
+      "Bash(curl *)",
+      "Bash(lsof -ti:5175)",
+      "Bash(pnpm --filter web build)"
     ]
   }
 }
