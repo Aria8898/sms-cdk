@@ -77,6 +77,8 @@ export const mockConfig = {
 
 /** createOrder / retryOrder 成功时记录时间，pollOrder 据此判断是否还在"等待"阶段 */
 let _mockOrderStartedAt = 0
+/** 当前订单内已触发 received 的次数，用于模拟 canRetry 耗尽 */
+let _mockReceivedCount = 0
 
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -90,6 +92,7 @@ async function mockCreateOrder(_cdkId: string, _serviceId?: string): Promise<Ord
   await sleep(600)
   _mockOrderStartedAt = Date.now()
   _mockChangeCount = 0
+  _mockReceivedCount = 0
   // skipCooldown：返回 2 分钟前的时间，让按钮立即可用
   const orderedAt = mockConfig.skipCooldown
     ? new Date(Date.now() - 121_000).toISOString()
@@ -103,13 +106,20 @@ async function mockPollOrder(_orderId: string): Promise<PollResult> {
     return { status: 'pending' }
   }
   switch (mockConfig.scenario) {
-    case 'received':
+    case 'received': {
+      _mockReceivedCount++
+      // 模拟后端逻辑：canRetry 取决于用户配置 + remaining 是否耗尽
+      // validate mock 固定返回 remaining=3/total=3，每次 received 消耗 1 次
+      const mockTotal = 3
+      const remainingAfterDeduct = mockTotal - _mockReceivedCount
+      const canRetry = mockConfig.canRetry && remainingAfterDeduct > 0
       return {
         status: 'received',
         smsContent: 'Your OpenAI verification code is 847291. Do not share it.',
         verificationCode: '847291',
-        canRetry: mockConfig.canRetry,
+        canRetry,
       }
+    }
     case 'completed':
       return {
         status: 'completed',
@@ -129,7 +139,8 @@ async function mockRetryOrder(_orderId: string): Promise<{ success: boolean }> {
     throw new Error('再发失败（Mock）')
   }
   await sleep(500)
-  // 重置计时，让下一轮轮询重新经历等待阶段
+  // 仅重置计时，让下一轮轮询重新经历等待阶段
+  // _mockReceivedCount 不重置：CDK remaining 跨 retry 是累计扣减的
   _mockOrderStartedAt = Date.now()
   return { success: true }
 }
