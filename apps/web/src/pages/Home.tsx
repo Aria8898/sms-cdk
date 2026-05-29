@@ -523,8 +523,8 @@ function StepWaiting({ data, goTo }: StepProps) {
 
 // ─── StepReceived ─────────────────────────────────────────────────────────────
 // 已收到短信：显示验证码
-// canRetry=false：复制即完成（静默 finish），隐藏倒计时和完成按钮
-// canRetry=true ：保留倒计时 + 再发一条 + 完成
+// canRetry=false：显示【再次兑换】，点击静默 finish + 回到 input；倒计时后台兜底不展示
+// canRetry=true ：显示倒计时 + 【再发一条】+ 【完成】；倒计时归零自动 finish
 
 function StepReceived({ data, goTo }: StepProps) {
   const { phone, service, sms, code, canRetry, orderId } = data
@@ -560,14 +560,21 @@ function StepReceived({ data, goTo }: StepProps) {
   function handleCopyCode() {
     navigator.clipboard.writeText(code ?? '').then(() => {
       setCodeCopied(true)
-      if (!canRetry) {
-        // canRetry=false：复制即完成，静默调 finish 跳转 success
-        // finish 失败时倒计时兜底自动完成，不打断用户
-        handleFinish()
-      } else {
-        setTimeout(() => setCodeCopied(false), 2000)
-      }
+      setTimeout(() => setCodeCopied(false), 2000)
     })
+  }
+
+  async function handleRetryExchange() {
+    if (!orderId) return
+    setIsFinishing(true)
+    setErrorMsg('')
+    stopTimer()
+    try {
+      await cdkApi.finishOrder(orderId)
+    } catch {
+      // finish 失败时倒计时兜底，不阻塞用户继续兑换
+    }
+    goTo('input', { ...DEFAULT_DATA })
   }
 
   async function handleRetry() {
@@ -679,25 +686,35 @@ function StepReceived({ data, goTo }: StepProps) {
         </div>
       )}
 
-      {/* Action buttons — 仅 canRetry=true 时显示 */}
-      {canRetry && (
-        <div className="flex gap-3 pt-2">
+      {/* Action buttons */}
+      <div className="flex gap-3 pt-2">
+        {canRetry ? (
+          <>
+            <button
+              onClick={handleRetry}
+              disabled={isRetrying || isFinishing}
+              className="flex-1 py-3 rounded-lg border border-blue-300 text-blue-600 text-sm font-medium hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {isRetrying ? '请求中...' : '再发一条'}
+            </button>
+            <button
+              onClick={handleFinish}
+              disabled={isRetrying || isFinishing}
+              className="flex-1 py-3 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
+            >
+              {isFinishing ? '完成中...' : '完成'}
+            </button>
+          </>
+        ) : (
           <button
-            onClick={handleRetry}
-            disabled={isRetrying || isFinishing}
-            className="flex-1 py-3 rounded-lg border border-blue-300 text-blue-600 text-sm font-medium hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            onClick={handleRetryExchange}
+            disabled={isFinishing}
+            className="w-full py-3 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
           >
-            {isRetrying ? '请求中...' : '再发一条'}
+            {isFinishing ? '处理中...' : '再次兑换'}
           </button>
-          <button
-            onClick={handleFinish}
-            disabled={isRetrying || isFinishing}
-            className="flex-1 py-3 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
-          >
-            {isFinishing ? '完成中...' : '完成'}
-          </button>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   )
 }

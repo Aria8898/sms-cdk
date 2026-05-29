@@ -58,9 +58,12 @@ CDK（兑换码，绑定 ServiceCategory + 可选 countryCode）
   → 后端取号
   → 前端轮询短信状态
   → 收到短信（received 状态）→ 显示验证码 → CDK 扣 1 次
-        ├── CDK 还有剩余次数 → 显示【再发一条】按钮
-        │       → 用户点击 → setStatus=3 → 重新等待 → 再收到 → 再扣 1 次
-        └── CDK 用完 / 点击完成 / 倒计时结束 → setStatus=6 → 结束
+        ├── CDK 还有剩余次数（canRetry=true）→ 显示倒计时 + 【再发一条】+ 【完成】
+        │       → 点击再发一条 → setStatus=3 → 重新等待 → 再收到 → 再扣 1 次
+        │       → 点击完成 / 倒计时归零 → setStatus=6 → 结束
+        └── CDK 用完（canRetry=false）→ 显示【再次兑换】，无倒计时显示
+                → 点击再次兑换 → 静默 setStatus=6 → 回到首页重新兑换
+                → 用户未操作 → 后台倒计时兜底 → setStatus=6 → 结束
   → 超时 → CDK 不扣次数 → 可重新取号（可换运营商重试）
 ```
 
@@ -90,8 +93,9 @@ input → confirm → waiting → success
 
 **SMSBower（新增 received 中间态）：**
 ```
-input → confirm → waiting → received → waiting（点再发一条）
-                                     → success（点完成 / 次数用完 / 超时）
+input → confirm → waiting → received → waiting（点再发一条，canRetry=true）
+                                     → success（点完成 / 倒计时归零，canRetry=true）
+                                     → input（点再次兑换，canRetry=false，后台静默完成）
                           → timeout  → confirm（可换运营商重试）
                           → cancel   → confirm（取消，冷却 2 分钟后可操作）
                           → change   → waiting（换号，同 orderId，changeCount+1，最多 2 次）
@@ -105,7 +109,7 @@ input → confirm → waiting → received → waiting（点再发一条）
 | input | 用户输入 CDK，实时格式校验 |
 | confirm | 显示服务名、剩余次数、国家限制（若有）、运营商选择 |
 | waiting | 显示手机号、倒计时，每 5 秒轮询 |
-| received | **SMSBower 独有**：显示验证码 + 操作按钮，倒计时继续 |
+| received | **SMSBower 独有**：显示验证码；canRetry=true 时显示倒计时 + 【再发一条】+ 【完成】；canRetry=false 时仅显示【再次兑换】 |
 | success | 显示验证码，流程结束 |
 | timeout | 超时提示，CDK 不扣次数，可重试 |
 | error | CDK 无效或已用完 |
@@ -173,9 +177,9 @@ input → confirm → waiting → received → waiting（点再发一条）
 ### 4.8 完成激活逻辑（SMSBower）
 
 以下任一条件触发 `setStatus=6`，订单标为 `completed`：
-1. 用户主动点击【完成】
-2. CDK 次数扣完（无法再发）
-3. 倒计时归零（前端主动调 finish 接口）
+1. 用户主动点击【完成】（canRetry=true 时可见）
+2. 用户点击【再次兑换】（canRetry=false 时，静默 finish 当前订单后回到兑换首页）
+3. 倒计时归零（后台兜底调用，不展示给用户）
 
 ### 4.9 限制规则
 
