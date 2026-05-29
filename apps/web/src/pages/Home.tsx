@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import { cdkApi } from '../lib/api'
-import type { PoolOption } from '../lib/api'
+import { cdkApi, mockConfig } from '../lib/api'
+import type { PoolOption, MockScenario } from '../lib/api'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -928,6 +928,143 @@ function StepError({ data, goTo }: StepProps) {
   )
 }
 
+// ─── MockPanel (仅开发模式渲染) ──────────────────────────────────────────────
+
+const SCENARIOS: { value: MockScenario; label: string; desc: string }[] = [
+  { value: 'received',    label: 'received',    desc: 'waiting → received（主路径）' },
+  { value: 'completed',   label: 'completed',   desc: 'waiting → success 直达（SMSPool）' },
+  { value: 'timeout',     label: 'timeout',     desc: 'waiting → timeout' },
+  { value: 'create_fail', label: 'create_fail', desc: 'confirm 页取号失败' },
+  { value: 'retry_fail',  label: 'retry_fail',  desc: 'received 页再发一条失败' },
+  { value: 'finish_fail', label: 'finish_fail', desc: 'received 页完成失败' },
+]
+
+function MockPanel() {
+  const [open, setOpen] = useState(false)
+  const [enabled, setEnabled] = useState(false)
+  const [scenario, setScenario] = useState<MockScenario>('received')
+  const [delaySec, setDelaySec] = useState(3)
+  const [canRetry, setCanRetry] = useState(true)
+
+  // 同步到 mockConfig（模块级对象，api.ts 读取）
+  useEffect(() => {
+    mockConfig.enabled = enabled
+    mockConfig.scenario = scenario
+    mockConfig.delayMs = delaySec * 1000
+    mockConfig.canRetry = canRetry
+  }, [enabled, scenario, delaySec, canRetry])
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        title="Mock 控制台"
+        className={`fixed bottom-4 right-4 w-10 h-10 rounded-full shadow-lg flex items-center justify-center text-base transition-colors z-50 ${
+          enabled ? 'bg-amber-400 hover:bg-amber-500' : 'bg-gray-200 hover:bg-gray-300'
+        }`}
+      >
+        🧪
+      </button>
+    )
+  }
+
+  return (
+    <div className="fixed bottom-4 right-4 w-72 bg-white rounded-xl shadow-xl border border-gray-200 z-50 overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-200">
+        <span className="text-sm font-semibold text-gray-700">🧪 Mock 控制台</span>
+        <button
+          onClick={() => setOpen(false)}
+          className="text-gray-400 hover:text-gray-600 text-lg leading-none"
+        >
+          ×
+        </button>
+      </div>
+
+      <div className="p-4 space-y-4">
+        {/* 开关 */}
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium text-gray-700">Mock 模式</span>
+          <button
+            onClick={() => setEnabled(v => !v)}
+            className={`relative w-11 h-6 rounded-full transition-colors ${
+              enabled ? 'bg-amber-400' : 'bg-gray-300'
+            }`}
+          >
+            <span
+              className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
+                enabled ? 'translate-x-5' : 'translate-x-0.5'
+              }`}
+            />
+          </button>
+        </div>
+
+        {enabled && (
+          <>
+            {/* 场景选择 */}
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">场景</p>
+              <div className="space-y-1">
+                {SCENARIOS.map(s => (
+                  <button
+                    key={s.value}
+                    onClick={() => setScenario(s.value)}
+                    className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors ${
+                      scenario === s.value
+                        ? 'bg-amber-50 border border-amber-300 text-amber-800'
+                        : 'bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100'
+                    }`}
+                  >
+                    <span className="font-mono font-semibold">{s.label}</span>
+                    <span className="ml-1.5 text-gray-400">{s.desc}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 延迟（仅非 create_fail 场景有意义） */}
+            {scenario !== 'create_fail' && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">延迟</p>
+                  <span className="text-xs font-mono text-gray-700">{delaySec}s</span>
+                </div>
+                <input
+                  type="range"
+                  min={1}
+                  max={15}
+                  value={delaySec}
+                  onChange={e => setDelaySec(Number(e.target.value))}
+                  className="w-full accent-amber-400"
+                />
+              </div>
+            )}
+
+            {/* canRetry（仅 received 场景有意义） */}
+            {scenario === 'received' && (
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">canRetry</span>
+                <button
+                  onClick={() => setCanRetry(v => !v)}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${
+                    canRetry ? 'bg-blue-500' : 'bg-gray-300'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
+                      canRetry ? 'translate-x-5' : 'translate-x-0.5'
+                    }`}
+                  />
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── Home (步骤状态管理器) ────────────────────────────────────────────────────
 
 export default function Home() {
@@ -948,6 +1085,7 @@ export default function Home() {
       {step === 'success'  && <StepSuccess  data={data} goTo={goTo} />}
       {step === 'timeout'  && <StepTimeout  data={data} goTo={goTo} />}
       {step === 'error'    && <StepError    data={data} goTo={goTo} />}
+      {import.meta.env.DEV && <MockPanel />}
     </>
   )
 }
