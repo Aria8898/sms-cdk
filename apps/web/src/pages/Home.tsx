@@ -70,9 +70,10 @@ interface RegionAProps {
   data: FlowData
   onValidate: (patch: Partial<FlowData>) => void
   onClear: () => void
+  isClearing?: boolean
 }
 
-function RegionA({ phase, data, onValidate, onClear }: RegionAProps) {
+function RegionA({ phase, data, onValidate, onClear, isClearing }: RegionAProps) {
   const isIdle = phase === 'idle'
   const [inputValue, setInputValue] = useState(data.cdk)
   const [isLoading, setIsLoading] = useState(false)
@@ -196,9 +197,10 @@ function RegionA({ phase, data, onValidate, onClear }: RegionAProps) {
       </div>
       <button
         onClick={onClear}
-        className="text-xs text-gray-400 hover:text-gray-600 shrink-0 transition-colors"
+        disabled={isClearing}
+        className="text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-400 hover:border-red-200 hover:text-red-500 disabled:opacity-50 disabled:cursor-not-allowed shrink-0 transition-colors"
       >
-        清除
+        {isClearing ? '清除中...' : '清除'}
       </button>
     </div>
   )
@@ -510,17 +512,6 @@ function PhoneCard({ phase, data, seconds, onPhaseChange }: CardProps) {
         </span>
       </div>
 
-      {/* 倒计时（waiting 阶段显示在左栏） */}
-      {phase === 'waiting' && seconds > 0 && (
-        <div className="flex items-center gap-2 text-orange-500">
-          <span className="text-sm shrink-0">⏱</span>
-          <span className="font-mono font-semibold tabular-nums text-sm">
-            {pad(Math.floor(seconds / 60))}:{pad(seconds % 60)}
-          </span>
-          <span className="text-xs text-gray-400">后超时</span>
-        </div>
-      )}
-
       <div className="flex-1" />
 
       {/* 超时：重新取号 */}
@@ -627,14 +618,7 @@ function CodeCard({ phase, data, seconds, onPhaseChange, stopTimer }: CardProps)
   if (phase === 'received') {
     return (
       <div className="bg-white rounded-2xl shadow-sm p-5 flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-          <p className="text-xs text-gray-400 font-medium">验证码</p>
-          {data.canRetry && seconds > 0 && (
-            <span className="text-xs text-orange-500 font-mono tabular-nums">
-              {pad(Math.floor(seconds / 60))}:{pad(seconds % 60)}
-            </span>
-          )}
-        </div>
+        <p className="text-xs text-gray-400 font-medium">验证码</p>
 
         {/* 大号验证码 */}
         <div className="bg-indigo-50 rounded-xl px-5 py-4 flex items-center justify-between gap-3">
@@ -669,6 +653,17 @@ function CodeCard({ phase, data, seconds, onPhaseChange, stopTimer }: CardProps)
         )}
 
         <div className="flex-1" />
+
+        {/* 倒计时徽标（canRetry=true 时显示，提示用户剩余激活时间） */}
+        {data.canRetry && seconds > 0 && (
+          <div className="flex items-center gap-2 bg-orange-50 border border-orange-100 rounded-xl px-4 py-2.5">
+            <span className="text-base shrink-0">⏱</span>
+            <span className="font-mono font-bold text-orange-500 tabular-nums text-lg">
+              {pad(Math.floor(seconds / 60))}:{pad(seconds % 60)}
+            </span>
+            <span className="text-xs text-orange-400 ml-auto">后自动完成</span>
+          </div>
+        )}
 
         {/* 操作按钮 */}
         <div className="flex gap-2">
@@ -903,13 +898,25 @@ function MockPanel() {
 export default function Home() {
   const [phase, setPhase] = useState<Phase>('idle')
   const [data, setData] = useState<FlowData>(DEFAULT_DATA)
+  const [isClearing, setIsClearing] = useState(false)
 
   function updatePhase(newPhase: Phase, patch?: Partial<FlowData>) {
     if (patch) setData(prev => ({ ...prev, ...patch }))
     setPhase(newPhase)
   }
 
-  function handleClear() {
+  async function handleClear() {
+    // received 阶段需先 finish 关闭激活，waiting/其他阶段直接清除
+    // cancel 接口后端暂未实现，waiting 阶段直接清除，订单等待自然超时
+    if (phase === 'received' && data.orderId) {
+      setIsClearing(true)
+      try {
+        await cdkApi.finishOrder(data.orderId)
+      } catch {
+        // 静默忽略，无论成功与否都清除前端状态
+      }
+      setIsClearing(false)
+    }
     setPhase('idle')
     setData(DEFAULT_DATA)
   }
@@ -924,6 +931,7 @@ export default function Home() {
         data={data}
         onValidate={patch => updatePhase('confirm', patch)}
         onClear={handleClear}
+        isClearing={isClearing}
       />
 
       {/* 区域 B：运营商选择（confirm 阶段）*/}
