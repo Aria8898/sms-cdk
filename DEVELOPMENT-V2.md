@@ -119,7 +119,8 @@ Step 1 (Provider 别名)
               └── Step 4 (validate 改造 + 运营商选择)
                     ├── Step 5 (SMSBower 适配器)  ← 可与 Step 4 并行
                     │     └── Step 6 (SMSBower 兑换流程)
-                    │           └── Step 8 (取消 + 换号)  ← 依赖 Step 6
+                    │           ├── Step 8 (取消 + 换号)  ← 依赖 Step 6
+                    │           └── Step 9 (短效时效型 CDK)  ← 依赖 Step 6
                     └── Step 7 (切换运营商 + 行为日志)  ← 依赖 Step 4 和 Step 6
 ```
 
@@ -350,6 +351,45 @@ waiting 步骤出现取消和换号按钮；取号后 2 分钟内按钮禁用并
 
 ---
 
+## Step 9 · 短效时效型 CDK（Type A）
+
+**目标：** 支持以时间为限制的 CDK 类型，有效期内无限接码不扣次数，到期自动失效。
+
+> 完整需求规格见 [CDK-TYPE-A-SPEC.md](./CDK-TYPE-A-SPEC.md)。
+
+| 层 | 改动 |
+|----|------|
+| DB | `cdks` 表新增 `cdk_type TEXT NOT NULL DEFAULT 'count'`（枚举：`count` / `timed`）；新增 `validity_minutes INTEGER` |
+| 后端 | `validate`：检测进行中订单返回 `activeOrder`；timed CDK 过期时错误响应附带 `expiresAt` + `lastOrderedAt` |
+| 后端 | `order`：timed 类型 `expiresAt = now + validity_minutes × 60s` |
+| 后端 | `order/:id/change`：timed 类型换号时同步重置 `expiresAt` |
+| 后端 | `order/:id/status`：timed 类型 `canRetry = expiresAt > now`；`expired` 路径区分两种情况（见下） |
+| 后端 | `admin/cdks/generate`：新增 `cdkType` / `validityMinutes` 参数 |
+| Web | 会话恢复：validate 返回 `activeOrder` 时跳过 confirm，直接还原到 pending/received 状态 |
+| Web | 过期提示：展示"CDK 已于 XX 过期，最后取号时间：YY" |
+| Web | 离开页面警告：timed CDK 在 pending/received 状态下显示提示条"请在有效期内完成操作，到期后将无法继续" |
+| Web | 倒计时改为根据 `expiresAt` 动态计算；区域 A 状态条显示到期时间 |
+| Admin | CDK 生成页加类型选择（按次 / 时效）+ 有效分钟数输入；CDK 列表加类型列 |
+
+**核心状态流转（两种 expired 路径）：**
+
+| 情况 | 订单状态 | CDK 状态 | 说明 |
+|------|----------|----------|------|
+| pending 到期，0 条短信 | `expired` | `active` | 未激活，不算消耗，CDK 可再次使用 |
+| received 到期，≥1 条短信 | `expired` | `exhausted` | 已激活，算消耗，CDK 不可再用 |
+
+**注：** "激活"定义为收到至少 1 条短信（取号 ≠ 激活）。换号后 `expiresAt` 重置（每次换号从换号时刻重新计算有效期）。
+
+**会话恢复** 同时对 count 型 CDK 生效（validate 统一处理 `activeOrder`，count 型 received 状态也可恢复）。
+
+**可见效果**
+Admin 可生成时效型 CDK，填入有效分钟数；用户兑换时倒计时根据 CDK 配置显示；有效期内无限再发一条不扣次；用户中途离开页面，有效期内重新输入 CDK 可恢复当前会话；时效到期后 CDK 自动失效，未收到短信的 CDK 可再次使用。
+
+**风险提示**
+`expired` 路径需区分"未激活到期"和"已激活到期"两种情况，状态更新逻辑需确保 CDK 状态与订单状态同步写入，避免 CDK 错误归还 active 或错误标为 exhausted。
+
+---
+
 ## 各步骤风险一览
 
 | Step | 改动规模 | 主要风险                                                             |
@@ -362,3 +402,4 @@ waiting 步骤出现取消和换号按钮；取号后 2 分钟内按钮禁用并
 | 6    | 中       | received 并发重复扣减 CDK                                            |
 | 7    | 小       | 切换时两个订单并存的状态一致性                                       |
 | 8    | 小       | 换号时 cancelOrder 成功但 orderNumber 失败，旧号已释放需提示用户重试 |
+| 9    | 中       | expired 路径需区分两种情况，CDK 状态与订单状态需同步写入；validate 改动涉及 count 和 timed 两种类型，需回归测试 |
