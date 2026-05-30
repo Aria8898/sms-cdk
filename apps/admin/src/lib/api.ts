@@ -52,6 +52,7 @@ export interface Cdk {
   categoryId: string | null; countryCode: string | null
   totalUses: number; remainingUses: number; status: string
   hasPendingOrder: boolean; createdAt: string
+  cdkType: string; validityMinutes: number | null
 }
 export interface OrderSms {
   id: string
@@ -183,11 +184,31 @@ export const poolApi = {
     ),
 }
 
+// ---- Security ----
+export interface LoginAttempt {
+  id: string; ipAddress: string; success: boolean; createdAt: string
+}
+export interface LoginAttemptsResult {
+  rows: LoginAttempt[]
+  stats: { total: number; failures: number }
+}
+export const securityApi = {
+  loginAttempts: (failOnly = false) =>
+    request<LoginAttemptsResult>(`/api/security/login-attempts${failOnly ? '?fail=1' : ''}`),
+}
+
 // ---- CDKs ----
 export const cdksApi = {
   list: (status?: string) =>
     request<Cdk[]>(`/api/cdks${status ? `?status=${status}` : ''}`),
-  generate: (data: { categoryId: string; usesPerCdk: number; quantity: number; countryCode?: string }) =>
+  generate: (data: {
+    categoryId: string
+    usesPerCdk: number
+    quantity: number
+    countryCode?: string
+    cdkType?: 'count' | 'timed'
+    validityMinutes?: number
+  }) =>
     request<{ cdks: Cdk[] }>('/api/cdks/generate', { method: 'POST', body: JSON.stringify(data) }),
   detail: (id: string) => request<CdkDetail>(`/api/cdks/${id}`),
   disable: (id: string) =>

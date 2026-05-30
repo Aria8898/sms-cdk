@@ -7,6 +7,7 @@ import CdkList from './pages/CdkList'
 import CdkGenerate from './pages/CdkGenerate'
 import CdkDetail from './pages/CdkDetail'
 import PoolMonitor from './pages/PoolMonitor'
+import SecurityLog from './pages/SecurityLog'
 import PrivateRoute from './components/PrivateRoute'
 
 export default function App() {
@@ -21,6 +22,7 @@ export default function App() {
         <Route path="/cdks/generate" element={<CdkGenerate />} />
         <Route path="/cdks/:id" element={<CdkDetail />} />
         <Route path="/pool-monitor" element={<PoolMonitor />} />
+        <Route path="/security" element={<SecurityLog />} />
       </Route>
     </Routes>
   )

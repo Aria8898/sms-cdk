@@ -19,7 +19,9 @@
       "Bash(apps/web/node_modules/.bin/tsc --project apps/web/tsconfig.app.json --noEmit)",
       "Bash(pnpm --filter api exec tsc --noEmit)",
       "Bash(pnpm --filter web exec tsc --noEmit)",
-      "Bash(pnpm --filter admin exec tsc --noEmit)"
+      "Bash(pnpm --filter admin exec tsc --noEmit)",
+      "Bash(pnpm --filter api tsc --noEmit)",
+      "Bash(pnpm --filter web tsc --noEmit)"
     ]
   }
 }

@@ -5,6 +5,7 @@ const navItems = [
   { to: '/services', label: 'Service 管理' },
   { to: '/cdks', label: 'CDK 管理' },
   { to: '/pool-monitor', label: '号池监控' },
+  { to: '/security', label: '安全日志' },
 ]
 
 export default function Layout() {

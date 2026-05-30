@@ -8,7 +8,9 @@ export default function CdkGenerate() {
   const [isLoadingCategories, setIsLoadingCategories] = useState(true)
   const [categoryId, setCategoryId] = useState('')
   const [countryCode, setCountryCode] = useState('')
+  const [cdkType, setCdkType] = useState<'count' | 'timed'>('count')
   const [usesPerCdk, setUsesPerCdk] = useState(1)
+  const [validityMinutes, setValidityMinutes] = useState(60)
   const [quantity, setQuantity] = useState(10)
   const [generated, setGenerated] = useState<Cdk[]>([])
   const [copied, setCopied] = useState(false)
@@ -45,13 +47,16 @@ export default function CdkGenerate() {
   async function handleGenerate() {
     if (!categoryId) return
     if (!isCountryValid) return
+    if (cdkType === 'timed' && (validityMinutes < 1 || validityMinutes > 10080)) return
     setIsGenerating(true)
     try {
       const result = await cdksApi.generate({
         categoryId,
-        usesPerCdk,
+        usesPerCdk: cdkType === 'timed' ? 1 : usesPerCdk,
         quantity,
         countryCode: trimmedCountry || undefined,
+        cdkType,
+        validityMinutes: cdkType === 'timed' ? validityMinutes : undefined,
       })
       setGenerated(result.cdks)
       setCopied(false)
@@ -102,6 +107,30 @@ export default function CdkGenerate() {
             </select>
           </div>
 
+          {/* CDK 类型选择 */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">CDK 类型</label>
+            <div className="grid grid-cols-2 gap-2">
+              {(['count', 'timed'] as const).map(t => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setCdkType(t)}
+                  className={`px-3 py-2 rounded-lg border text-sm font-medium transition-colors text-left ${
+                    cdkType === t
+                      ? 'border-blue-500 bg-blue-50 text-blue-700'
+                      : 'border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  {t === 'count' ? '按次' : '时效'}
+                  <p className="text-xs font-normal mt-0.5 text-current opacity-70">
+                    {t === 'count' ? '每次收码扣 1 次' : '有效期内无限接码'}
+                  </p>
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               指定国家
@@ -122,16 +151,37 @@ export default function CdkGenerate() {
             )}
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">每张可用次数</label>
-            <input
-              type="number"
-              value={usesPerCdk}
-              onChange={e => setUsesPerCdk(Math.max(1, Number(e.target.value)))}
-              min={1}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
+          {cdkType === 'count' ? (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">每张可用次数</label>
+              <input
+                type="number"
+                value={usesPerCdk}
+                onChange={e => setUsesPerCdk(Math.max(1, Number(e.target.value)))}
+                min={1}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          ) : (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                有效时长（分钟）
+                <span className="ml-1 text-xs text-gray-400 font-normal">（1–10080，最长 7 天）</span>
+              </label>
+              <input
+                type="number"
+                value={validityMinutes}
+                onChange={e => setValidityMinutes(Math.min(10080, Math.max(1, Number(e.target.value))))}
+                min={1}
+                max={10080}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <p className="mt-1 text-xs text-gray-400">
+                ≈ {(validityMinutes / 60).toFixed(1)} 小时
+              </p>
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">生成数量（最多 100）</label>
             <input
@@ -153,7 +203,9 @@ export default function CdkGenerate() {
                 : `普通格式：{缩写}-XXXX-XXXX-XXXX`}
             </p>
             <p className="text-xs text-gray-400">
-              字符集：A-Z 及 2-9（排除易混淆字符 0 O I L 1）
+              {cdkType === 'timed'
+                ? `时效型：有效期 ${validityMinutes} 分钟，有效期内无限接码`
+                : `按次型：每张 ${usesPerCdk} 次`}
             </p>
           </div>
 

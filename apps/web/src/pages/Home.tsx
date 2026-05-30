@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { cdkApi, mockConfig } from '../lib/api'
-import type { PoolOption, MockScenario } from '../lib/api'
+import type { PoolOption, MockScenario, ValidateError } from '../lib/api'
 
 // ─── 冷却倒计时 hook ──────────────────────────────────────────────────────────
 
@@ -36,10 +36,13 @@ interface FlowData {
   cdk: string
   cdkId: string
   service: string
-  remaining: number
-  total: number
+  remaining: number | null
+  total: number | null
+  cdkType: string
   orderId: string
   phone?: string
+  /** 订单到期的绝对时间（ISO），用于倒计时和 timed CDK 提示 */
+  orderExpiresAt?: string
   expiresIn?: number
   sms?: string
   code?: string
@@ -51,13 +54,13 @@ interface FlowData {
   smsHistory: SmsRecord[]
   changeCount: number
   orderedAt?: string
-  /** 切换运营商时记录上一个已取消/超时的订单 ID，用于新订单的链路追踪 */
   previousOrderId?: string
 }
 
 const DEFAULT_DATA: FlowData = {
   cdk: '', cdkId: '', service: '',
-  remaining: 0, total: 0, orderId: '',
+  remaining: 0, total: 0, cdkType: 'count',
+  orderId: '',
   smsHistory: [], changeCount: 0,
 }
 
@@ -85,13 +88,26 @@ const CDK_REGEX = /^[A-Z]{2}-(?:[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}|[A-Z]{2}-[A-
 
 function pad(n: number) { return String(n).padStart(2, '0') }
 
+/** 根据 expiresAt 计算剩余秒数 */
+function secondsUntil(expiresAt: string | undefined): number {
+  if (!expiresAt) return 0
+  return Math.max(0, Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 1000))
+}
+
+/** 格式化绝对时间为本地时间字符串 */
+function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString('zh-CN', {
+    month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit',
+  })
+}
+
 // ─── RegionA — CDK 输入 & 状态条 ─────────────────────────────────────────────
-// idle：完整输入表单；其余阶段：紧凑信息条（输入框锁定）
 
 interface RegionAProps {
   phase: Phase
   data: FlowData
-  onValidate: (patch: Partial<FlowData>) => void
+  onValidate: (patch: Partial<FlowData>, nextPhase: Phase) => void
   onClear: () => void
   isClearing?: boolean
 }
@@ -101,6 +117,7 @@ function RegionA({ phase, data, onValidate, onClear, isClearing }: RegionAProps)
   const [inputValue, setInputValue] = useState(data.cdk)
   const [isLoading, setIsLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
+  const [expiredInfo, setExpiredInfo] = useState<{ expiresAt?: string; lastOrderedAt?: string } | null>(null)
 
   const isValid = CDK_REGEX.test(inputValue)
   const hasInput = inputValue.trim().length > 0
@@ -109,23 +126,66 @@ function RegionA({ phase, data, onValidate, onClear, isClearing }: RegionAProps)
     if (!inputValue.trim()) return
     setIsLoading(true)
     setErrorMsg('')
+    setExpiredInfo(null)
     try {
       const result = await cdkApi.validate(inputValue.trim())
+
+      // 会话恢复：validate 返回 activeOrder
+      if (result.activeOrder) {
+        const ao = result.activeOrder
+        const secondsLeft = secondsUntil(ao.expiresAt ?? undefined)
+        const smsHistory: SmsRecord[] = ao.smsContent ? [{
+          code: ao.verificationCode ?? '',
+          sms: ao.smsContent,
+          receivedAt: new Date().toISOString(),
+        }] : []
+
+        onValidate({
+          cdk: inputValue.trim(),
+          cdkId: result.cdkId,
+          service: result.service.name,
+          remaining: result.remaining,
+          total: result.total,
+          cdkType: result.cdkType,
+          countryCode: result.countryCode,
+          pools: result.pools,
+          orderId: ao.orderId,
+          phone: ao.phoneNumber ?? undefined,
+          orderExpiresAt: ao.expiresAt ?? undefined,
+          secondsLeft,
+          canRetry: ao.canRetry,
+          sms: ao.smsContent ?? undefined,
+          code: ao.verificationCode ?? undefined,
+          smsHistory,
+          changeCount: ao.changeCount,
+          orderedAt: ao.orderedAt ?? undefined,
+        }, ao.status === 'received' ? 'received' : 'waiting')
+        return
+      }
+
       const defaultPool = result.pools.find(p => p.isDefault && p.hasStock)
         ?? result.pools.find(p => p.hasStock)
         ?? result.pools[0]
+
       onValidate({
         cdk: inputValue.trim(),
         cdkId: result.cdkId,
         service: result.service.name,
         remaining: result.remaining,
         total: result.total,
+        cdkType: result.cdkType,
         countryCode: result.countryCode,
         pools: result.pools,
         selectedServiceId: defaultPool?.serviceId,
-      })
+      }, 'confirm')
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : '验证失败，请检查兑换码')
+      const e = err as ValidateError
+      if (e.expiresAt || e.lastOrderedAt) {
+        setExpiredInfo({ expiresAt: e.expiresAt, lastOrderedAt: e.lastOrderedAt })
+        setErrorMsg(e.message)
+      } else {
+        setErrorMsg(e.message ?? '验证失败，请检查兑换码')
+      }
     } finally {
       setIsLoading(false)
     }
@@ -151,7 +211,7 @@ function RegionA({ phase, data, onValidate, onClear, isClearing }: RegionAProps)
             <input
               type="text"
               value={inputValue}
-              onChange={e => { setInputValue(e.target.value.toUpperCase()); setErrorMsg('') }}
+              onChange={e => { setInputValue(e.target.value.toUpperCase()); setErrorMsg(''); setExpiredInfo(null) }}
               onKeyDown={handleKeyDown}
               placeholder="OP-XXXX-XXXX-XXXX"
               className={`w-full px-4 py-3 border rounded-xl text-sm focus:outline-none focus:ring-2 transition-colors font-mono tracking-wider ${borderClass}`}
@@ -171,6 +231,16 @@ function RegionA({ phase, data, onValidate, onClear, isClearing }: RegionAProps)
           {errorMsg && (
             <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3">
               <p className="text-sm text-red-600">{errorMsg}</p>
+              {expiredInfo && (
+                <div className="mt-1.5 text-xs text-red-500 space-y-0.5">
+                  {expiredInfo.expiresAt && (
+                    <p>到期时间：{formatDateTime(expiredInfo.expiresAt)}</p>
+                  )}
+                  {expiredInfo.lastOrderedAt && (
+                    <p>最后取号：{formatDateTime(expiredInfo.lastOrderedAt)}</p>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -197,7 +267,8 @@ function RegionA({ phase, data, onValidate, onClear, isClearing }: RegionAProps)
   }
 
   // ── 会话激活：紧凑信息条
-  const dots = Array.from({ length: data.total }, (_, i) => i < data.remaining)
+  const isTimed = data.cdkType === 'timed'
+  const dots = !isTimed ? Array.from({ length: data.total ?? 0 }, (_, i) => i < (data.remaining ?? 0)) : []
 
   return (
     <div className="bg-white rounded-2xl shadow-sm px-5 py-3.5 flex items-center justify-between gap-4">
@@ -211,12 +282,24 @@ function RegionA({ phase, data, onValidate, onClear, isClearing }: RegionAProps)
             {countryDisplay(data.countryCode)}
           </span>
         )}
-        <div className="flex items-center gap-1.5 shrink-0">
-          {dots.map((active, i) => (
-            <span key={i} className={`w-2 h-2 rounded-full ${active ? 'bg-indigo-500' : 'bg-gray-200'}`} />
-          ))}
-          <span className="text-xs text-gray-400 ml-0.5">{data.remaining}/{data.total}</span>
-        </div>
+        {isTimed ? (
+          <span className="text-xs bg-purple-50 text-purple-600 px-2 py-0.5 rounded-full border border-purple-100 shrink-0">
+            时效型
+          </span>
+        ) : (
+          <div className="flex items-center gap-1.5 shrink-0">
+            {dots.map((active, i) => (
+              <span key={i} className={`w-2 h-2 rounded-full ${active ? 'bg-indigo-500' : 'bg-gray-200'}`} />
+            ))}
+            <span className="text-xs text-gray-400 ml-0.5">{data.remaining}/{data.total}</span>
+          </div>
+        )}
+        {/* timed CDK 显示到期时间 */}
+        {isTimed && data.orderExpiresAt && (
+          <span className="text-xs text-gray-400 shrink-0">
+            到期：{formatDateTime(data.orderExpiresAt)}
+          </span>
+        )}
       </div>
       <button
         onClick={onClear}
@@ -225,6 +308,19 @@ function RegionA({ phase, data, onValidate, onClear, isClearing }: RegionAProps)
       >
         {isClearing ? '清除中...' : '清除'}
       </button>
+    </div>
+  )
+}
+
+// ─── TimedWarningBar — 时效 CDK 离开提示条 ───────────────────────────────────
+
+function TimedWarningBar() {
+  return (
+    <div className="bg-orange-50 border border-orange-200 rounded-xl px-4 py-3 flex items-center gap-2.5">
+      <span className="text-orange-500 shrink-0">⚠</span>
+      <p className="text-sm text-orange-700 font-medium">
+        请在有效期内完成操作，到期后将无法继续
+      </p>
     </div>
   )
 }
@@ -253,11 +349,13 @@ function ConfirmPanel({ data, onConfirm, onBack }: ConfirmPanelProps) {
     setErrorMsg('')
     try {
       const result = await cdkApi.createOrder(data.cdkId, selectedId, data.previousOrderId)
+      const sl = secondsUntil(result.expiresAt)
       onConfirm({
         orderId: result.orderId,
         phone: result.phoneNumber,
         expiresIn: result.expiresIn,
-        secondsLeft: result.expiresIn,
+        orderExpiresAt: result.expiresAt,
+        secondsLeft: sl,
         selectedServiceId: selectedId,
         changeCount: result.changeCount,
         orderedAt: result.orderedAt,
@@ -382,11 +480,16 @@ function SessionPanel({ phase, data, onPhaseChange }: SessionPanelProps) {
           if (phaseRef.current === 'waiting') {
             onPhaseChangeRef.current('timeout')
           } else if (phaseRef.current === 'received') {
-            // 倒计时归零：后台静默完成
-            const orderId = dataRef.current.orderId
-            cdkApi.finishOrder(orderId).catch(() => {}).finally(() => {
-              onPhaseChangeRef.current('success')
-            })
+            const d = dataRef.current
+            if (d.cdkType === 'timed') {
+              // 时效型：倒计时归零 → 禁用 retry，不调用 finish
+              onPhaseChangeRef.current('received', { canRetry: false })
+            } else {
+              // 按次型：倒计时归零 → 静默完成
+              cdkApi.finishOrder(d.orderId).catch(() => {}).finally(() => {
+                onPhaseChangeRef.current('success')
+              })
+            }
           }
           return 0
         }
@@ -418,7 +521,7 @@ function SessionPanel({ phase, data, onPhaseChange }: SessionPanelProps) {
             code: result.verificationCode ?? '',
             canRetry: result.canRetry ?? false,
             secondsLeft: secondsRef.current,
-            remaining: Math.max(0, d.remaining - 1),
+            remaining: d.cdkType === 'timed' ? d.remaining : Math.max(0, (d.remaining ?? 1) - 1),
             smsHistory: [newRecord, ...d.smsHistory],
           })
         } else if (result.status === 'completed') {
@@ -435,7 +538,6 @@ function SessionPanel({ phase, data, onPhaseChange }: SessionPanelProps) {
         } else if (result.status === 'cancelled') {
           clearInterval(interval)
           if (timerRef.current) clearInterval(timerRef.current)
-          // cancelled 由换号/取消触发，PhoneCard 自己管状态跳转，这里兜底跳 timeout
           onPhaseChangeRef.current('timeout')
         }
       } catch {
@@ -479,7 +581,6 @@ interface CardProps {
   stopTimer?: () => void
 }
 
-/** 从当前 pools 中挑一个不同于 currentId 的运营商；若只有一个则返回当前 */
 function pickAlternativePool(pools: PoolOption[], currentId?: string): PoolOption | undefined {
   if (!pools.length) return undefined
   const others = pools.filter(p => p.serviceId !== currentId)
@@ -520,10 +621,12 @@ function PhoneCard({ phase, data, onPhaseChange }: CardProps) {
     setActionError('')
     try {
       const result = await cdkApi.changeNumber(data.orderId)
+      const sl = secondsUntil(result.expiresAt)
       onPhaseChange('waiting', {
         phone: result.phoneNumber,
         expiresIn: result.expiresIn,
-        secondsLeft: result.expiresIn,
+        orderExpiresAt: result.expiresAt,
+        secondsLeft: sl,
         changeCount: result.changeCount,
         orderedAt: result.orderedAt,
         sms: undefined,
@@ -535,22 +638,20 @@ function PhoneCard({ phase, data, onPhaseChange }: CardProps) {
     }
   }
 
-  /** waiting：先取消当前订单（reason=user_switched_pool），再跳回 confirm 并自动选另一个运营商 */
   async function handleSwitchProvider() {
     setIsSwitching(true)
     setActionError('')
     try {
       if (phase === 'waiting' && data.orderId) {
-        // 尽力取消，失败不阻断切换
         await cdkApi.cancelOrder(data.orderId, 'user_switched_pool').catch(() => {})
       }
       const alt = pickAlternativePool(data.pools ?? [], data.selectedServiceId)
       onPhaseChange('confirm', {
         selectedServiceId: alt?.serviceId,
         previousOrderId: data.orderId,
-        // 清除会话相关字段
         phone: undefined,
         expiresIn: undefined,
+        orderExpiresAt: undefined,
         secondsLeft: undefined,
         sms: undefined,
         code: undefined,
@@ -566,6 +667,7 @@ function PhoneCard({ phase, data, onPhaseChange }: CardProps) {
   const isBusy = isCancelling || isChanging || isSwitching
   const changeExhausted = data.changeCount >= 2
   const inCooldown = cooldownLeft > 0
+  const isTimed = data.cdkType === 'timed'
 
   return (
     <div className="bg-white rounded-2xl shadow-sm p-5 flex flex-col gap-4">
@@ -610,9 +712,15 @@ function PhoneCard({ phase, data, onPhaseChange }: CardProps) {
 
       {/* 状态徽标 */}
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-xs bg-indigo-50 text-indigo-500 px-2 py-0.5 rounded-full border border-indigo-100">
-          验证码: {data.smsHistory.length}/{data.total}次
-        </span>
+        {isTimed ? (
+          <span className="text-xs bg-purple-50 text-purple-500 px-2 py-0.5 rounded-full border border-purple-100">
+            时效型 · 无限接码
+          </span>
+        ) : (
+          <span className="text-xs bg-indigo-50 text-indigo-500 px-2 py-0.5 rounded-full border border-indigo-100">
+            验证码: {data.smsHistory.length}/{data.total ?? '?'}次
+          </span>
+        )}
         <span className={`text-xs px-2 py-0.5 rounded-full border ${changeExhausted ? 'bg-red-50 text-red-400 border-red-100' : 'bg-gray-50 text-gray-400 border-gray-100'}`}>
           换号: {data.changeCount}/2次
         </span>
@@ -703,6 +811,7 @@ function CodeCard({ phase, data, seconds, onPhaseChange, stopTimer }: CardProps)
   const [isRetrying, setIsRetrying] = useState(false)
   const [isFinishing, setIsFinishing] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
+  const isTimed = data.cdkType === 'timed'
 
   function handleCopyCode() {
     navigator.clipboard.writeText(data.code ?? '').then(() => {
@@ -768,7 +877,9 @@ function CodeCard({ phase, data, seconds, onPhaseChange, stopTimer }: CardProps)
             <p className="text-3xl font-mono font-bold text-orange-500 tabular-nums">
               {pad(Math.floor(seconds / 60))}:{pad(seconds % 60)}
             </p>
-            <p className="text-xs text-gray-400 mt-0.5">剩余等待时间</p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {isTimed ? '有效期剩余时间' : '剩余等待时间'}
+            </p>
           </div>
         )}
       </div>
@@ -777,6 +888,8 @@ function CodeCard({ phase, data, seconds, onPhaseChange, stopTimer }: CardProps)
 
   // ── received：显示验证码
   if (phase === 'received') {
+    const canRetry = data.canRetry ?? false
+
     return (
       <div className="bg-white rounded-2xl shadow-sm p-5 flex flex-col gap-4">
         <p className="text-xs text-gray-400 font-medium">验证码</p>
@@ -815,20 +928,22 @@ function CodeCard({ phase, data, seconds, onPhaseChange, stopTimer }: CardProps)
 
         <div className="flex-1" />
 
-        {/* 倒计时徽标（canRetry=true 时显示，提示用户剩余激活时间） */}
-        {data.canRetry && seconds > 0 && (
+        {/* 倒计时徽标 */}
+        {canRetry && seconds > 0 && (
           <div className="flex items-center gap-2 bg-orange-50 border border-orange-100 rounded-xl px-4 py-2.5">
             <span className="text-base shrink-0">⏱</span>
             <span className="font-mono font-bold text-orange-500 tabular-nums text-lg">
               {pad(Math.floor(seconds / 60))}:{pad(seconds % 60)}
             </span>
-            <span className="text-xs text-orange-400 ml-auto">后自动完成</span>
+            <span className="text-xs text-orange-400 ml-auto">
+              {isTimed ? '有效期剩余' : '后自动完成'}
+            </span>
           </div>
         )}
 
         {/* 操作按钮 */}
         <div className="flex gap-2">
-          {data.canRetry ? (
+          {canRetry ? (
             <>
               <button
                 onClick={handleRetry}
@@ -837,9 +952,11 @@ function CodeCard({ phase, data, seconds, onPhaseChange, stopTimer }: CardProps)
               >
                 {isRetrying
                   ? '请求中...'
-                  : data.remaining > 0
-                    ? `再发一条（剩 ${data.remaining} 次）`
-                    : '再发一条'}
+                  : isTimed
+                    ? '再发一条'
+                    : (data.remaining ?? 0) > 0
+                      ? `再发一条（剩 ${data.remaining} 次）`
+                      : '再发一条'}
               </button>
               <button
                 onClick={handleFinish}
@@ -1092,11 +1209,10 @@ export default function Home() {
         if (phase === 'received') {
           await cdkApi.finishOrder(data.orderId)
         } else if (phase === 'waiting') {
-          // 尝试取消，失败静默忽略（冷却期内或网络错误）
           await cdkApi.cancelOrder(data.orderId).catch(() => {})
         }
       } catch {
-        // 静默忽略，无论成功与否都清除前端状态
+        // 静默忽略
       }
       setIsClearing(false)
     }
@@ -1104,7 +1220,13 @@ export default function Home() {
     setData(DEFAULT_DATA)
   }
 
+  function handleValidate(patch: Partial<FlowData>, nextPhase: Phase) {
+    setData(prev => ({ ...prev, ...DEFAULT_DATA, ...patch }))
+    setPhase(nextPhase)
+  }
+
   const showSession = phase === 'waiting' || phase === 'received' || phase === 'success' || phase === 'timeout'
+  const showTimedWarning = data.cdkType === 'timed' && (phase === 'waiting' || phase === 'received')
 
   return (
     <div className="space-y-4">
@@ -1112,10 +1234,13 @@ export default function Home() {
       <RegionA
         phase={phase}
         data={data}
-        onValidate={patch => updatePhase('confirm', patch)}
+        onValidate={handleValidate}
         onClear={handleClear}
         isClearing={isClearing}
       />
+
+      {/* 时效型 CDK 警告条 */}
+      {showTimedWarning && <TimedWarningBar />}
 
       {/* 区域 B：运营商选择（confirm 阶段）*/}
       {phase === 'confirm' && (

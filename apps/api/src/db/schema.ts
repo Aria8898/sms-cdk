@@ -43,6 +43,9 @@ export const cdks = sqliteTable('cdks', {
   remainingUses: integer('remaining_uses').notNull(),
   status: text('status').notNull().default('active'),
   createdAt: text('created_at').notNull(),
+  // Step 9: 时效型 CDK
+  cdkType: text('cdk_type').notNull().default('count'),
+  validityMinutes: integer('validity_minutes'),
 })
 
 export const orders = sqliteTable('orders', {
@@ -63,12 +66,24 @@ export const orders = sqliteTable('orders', {
   orderedAt: text('ordered_at'),
   // Step 7: 切换运营商链路追踪
   fromOrderId: text('from_order_id'),
+  // Step 9: 附加追踪字段
+  errorMessage: text('error_message'),
+  cost: real('cost'),
+  ipAddress: text('ip_address'),
 })
 
 export const poolStatusCache = sqliteTable('pool_status_cache', {
   serviceId: text('service_id').primaryKey(),
   data: text('data').notNull(),
   cachedAt: text('cached_at').notNull(),
+})
+
+// Step 9: 登录尝试安全审计表
+export const loginAttempts = sqliteTable('login_attempts', {
+  id: text('id').primaryKey(),
+  ipAddress: text('ip_address').notNull(),
+  success: integer('success', { mode: 'boolean' }).notNull().default(false),
+  createdAt: text('created_at').notNull(),
 })
 
 // Step 6: 同一激活内的多条短信记录

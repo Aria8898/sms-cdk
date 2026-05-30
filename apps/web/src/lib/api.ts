@@ -22,19 +22,39 @@ export interface PoolOption {
   hasStock: boolean
 }
 
+export interface ActiveOrderInfo {
+  orderId: string
+  status: 'pending' | 'received'
+  phoneNumber: string | null
+  expiresAt: string | null
+  smsContent: string | null
+  verificationCode: string | null
+  canRetry: boolean
+  changeCount: number
+  orderedAt: string | null
+}
+
 export interface ValidateResult {
   cdkId: string
   service: { name: string }
-  remaining: number
-  total: number
+  cdkType: string
+  remaining: number | null
+  total: number | null
   countryCode?: string
   pools: PoolOption[]
+  activeOrder?: ActiveOrderInfo
+}
+
+export interface ValidateError extends Error {
+  expiresAt?: string
+  lastOrderedAt?: string
 }
 
 export interface OrderResult {
   orderId: string
   phoneNumber: string
   expiresIn: number
+  expiresAt: string
   changeCount: number
   orderedAt: string
 }
@@ -42,6 +62,7 @@ export interface OrderResult {
 export interface ChangeResult {
   phoneNumber: string
   expiresIn: number
+  expiresAt: string
   changeCount: number
   orderedAt: string
 }
@@ -97,7 +118,8 @@ async function mockCreateOrder(_cdkId: string, _serviceId?: string, _fromOrderId
   const orderedAt = mockConfig.skipCooldown
     ? new Date(Date.now() - 121_000).toISOString()
     : new Date().toISOString()
-  return { orderId: 'mock-order-id', phoneNumber: '+1 555 847 2910', expiresIn: 1200, changeCount: 0, orderedAt }
+  const expiresAt = new Date(Date.now() + 1200 * 1000).toISOString()
+  return { orderId: 'mock-order-id', phoneNumber: '+1 555 847 2910', expiresIn: 1200, expiresAt, changeCount: 0, orderedAt }
 }
 
 async function mockPollOrder(_orderId: string): Promise<PollResult> {
@@ -175,9 +197,11 @@ async function mockChangeNumber(_orderId: string): Promise<ChangeResult> {
   const orderedAt = mockConfig.skipCooldown
     ? new Date(Date.now() - 121_000).toISOString()
     : new Date().toISOString()
+  const expiresAt = new Date(Date.now() + 1200 * 1000).toISOString()
   return {
     phoneNumber: '+1 555 ' + Math.floor(Math.random() * 900 + 100) + ' ' + Math.floor(Math.random() * 9000 + 1000),
     expiresIn: 1200,
+    expiresAt,
     changeCount: _mockChangeCount,
     orderedAt,
   }
@@ -194,12 +218,22 @@ function withMock<TArgs extends unknown[], TReturn>(
 }
 
 export const cdkApi = {
-  // validate 始终使用真实请求
-  validate: (code: string) =>
-    request<ValidateResult>('/api/cdk/validate', {
+  // validate 始终使用真实请求；过期响应需附带 expiresAt / lastOrderedAt
+  validate: async (code: string): Promise<ValidateResult> => {
+    const res = await fetch(`${BASE}/api/cdk/validate`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code }),
-    }),
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({})) as { error?: string; expiresAt?: string; lastOrderedAt?: string }
+      const err = new Error(data.error ?? `请求失败 (${res.status})`) as ValidateError
+      err.expiresAt = data.expiresAt
+      err.lastOrderedAt = data.lastOrderedAt
+      throw err
+    }
+    return res.json() as Promise<ValidateResult>
+  },
 
   createOrder: withMock(
     (cdkId: string, serviceId?: string, fromOrderId?: string) =>

@@ -197,9 +197,59 @@ async function resolveProviderSlug(
   return legacyRow?.slug ?? null
 }
 
+// ─── 公共：过期订单清理（处理 CDK 状态，适用于 timed 型）────────────────────
+
+async function expireOrder(
+  db: ReturnType<typeof getDb>,
+  orderId: string,
+  orderStatus: string,
+  cdkId: string,
+  cdkType: string,
+  now: string,
+): Promise<void> {
+  if (cdkType === 'timed') {
+    if (orderStatus === 'received') {
+      // received 状态到期 → CDK 已激活，标为 exhausted
+      await db.update(cdks).set({ status: 'exhausted' }).where(eq(cdks.id, cdkId))
+    }
+    // pending 状态到期 → 未激活，CDK 回到 active（不需要修改，active 未被更改）
+  }
+  await db
+    .update(orders)
+    .set({ status: 'expired', completedAt: now })
+    .where(eq(orders.id, orderId))
+}
+
+// ─── 内存限频（per-isolate，最佳努力）────────────────────────────────────────
+
+const _validateRateMap = new Map<string, number[]>()
+
+function checkValidateRateLimit(ip: string, max: number): boolean {
+  const now = Date.now()
+  const window = now - 60_000
+  const times = (_validateRateMap.get(ip) ?? []).filter(t => t > window)
+  if (times.length >= max) return false
+  times.push(now)
+  _validateRateMap.set(ip, times)
+  // 简单清理：超过 1 万条目时清理过期记录
+  if (_validateRateMap.size > 10_000) {
+    for (const [k, v] of _validateRateMap) {
+      if (v.every(t => t <= window)) _validateRateMap.delete(k)
+    }
+  }
+  return true
+}
+
 // ─── POST /api/cdk/validate ───────────────────────────────────────────────────
 
 app.post('/validate', async (c) => {
+  // IP 限频
+  const ip = c.req.header('CF-Connecting-IP') ?? c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ?? 'unknown'
+  const rateMax = parseInt(c.env.RATE_LIMIT_VALIDATE ?? '10', 10)
+  if (!checkValidateRateLimit(ip, rateMax)) {
+    return c.json({ error: '请求过于频繁，请稍后重试' }, 429)
+  }
+
   const body = await c.req.json<{ code: string }>()
   const db = getDb(c.env.DB)
 
@@ -212,6 +262,8 @@ app.post('/validate', async (c) => {
       countryCode: cdks.countryCode,
       categoryId: cdks.categoryId,
       serviceId: cdks.serviceId,
+      cdkType: cdks.cdkType,
+      validityMinutes: cdks.validityMinutes,
       serviceName: sql<string>`COALESCE(${serviceCategories.name}, ${services.name})`.as('service_name'),
     })
     .from(cdks)
@@ -227,49 +279,107 @@ app.post('/validate', async (c) => {
     return c.json({ error: 'CDK 已停用' }, 400)
   }
 
-  if (row.remainingUses === 0 || row.status === 'exhausted') {
+  // 时效型 CDK 已耗尽：返回过期信息
+  if (row.status === 'exhausted' && row.cdkType === 'timed') {
+    const [lastOrder] = await db
+      .select({ expiresAt: orders.expiresAt, orderedAt: orders.orderedAt, createdAt: orders.createdAt })
+      .from(orders)
+      .where(eq(orders.cdkId, row.id))
+      .orderBy(sql`${orders.createdAt} DESC`)
+      .limit(1)
+    return c.json({
+      error: 'CDK 已过期',
+      expiresAt: lastOrder?.expiresAt ?? null,
+      lastOrderedAt: lastOrder?.orderedAt ?? lastOrder?.createdAt ?? null,
+    }, 400)
+  }
+
+  // 按次型 CDK 次数用完
+  if (row.cdkType !== 'timed' && (row.remainingUses === 0 || row.status === 'exhausted')) {
     return c.json({ error: 'CDK 次数已用完' }, 400)
   }
 
-  // 检查是否有进行中的订单（pending 或 received），且尚未过期
   const now = new Date().toISOString()
+
+  // 检查进行中订单（pending / received）
   const activeOrders = await db
-    .select({ id: orders.id, expiresAt: orders.expiresAt })
+    .select({ id: orders.id, expiresAt: orders.expiresAt, status: orders.status })
     .from(orders)
     .where(and(
       eq(orders.cdkId, row.id),
       or(eq(orders.status, 'pending'), eq(orders.status, 'received')),
     ))
 
-  // 过期的 order 自动设为 expired，不再阻拦
-  const expiredIds = activeOrders
-    .filter(o => o.expiresAt && o.expiresAt < now)
-    .map(o => o.id)
-  if (expiredIds.length > 0) {
-    await Promise.all(
-      expiredIds.map(id => db.update(orders).set({ status: 'expired' }).where(eq(orders.id, id))),
-    )
+  // 过期订单清理
+  const expiredOrders = activeOrders.filter(o => o.expiresAt && o.expiresAt < now)
+  for (const eo of expiredOrders) {
+    await expireOrder(db, eo.id, eo.status, row.id, row.cdkType, now)
   }
 
-  const stillActive = activeOrders.filter(o => !expiredIds.includes(o.id))
-  if (stillActive.length > 0) {
-    return c.json({ error: 'CDK 正在使用中，请等待当前流程完成' }, 400)
-  }
+  const stillActive = activeOrders.filter(o => !expiredOrders.some(e => e.id === o.id))
 
-  // 并发查询各运营商号池缓存
+  // 并发查询各运营商号池缓存（无论有无进行中订单都查，返回供前端显示）
   const serviceMetas = await getServiceMetas(db, { categoryId: row.categoryId, serviceId: row.serviceId })
   const pools = await Promise.all(
     serviceMetas.map(svc => resolvePoolEntry(db, svc, c.env, row.countryCode ?? undefined)),
   )
 
-  return c.json({
+  const baseResponse = {
     cdkId: row.id,
     service: { name: row.serviceName },
-    remaining: row.remainingUses,
-    total: row.totalUses,
+    cdkType: row.cdkType,
+    remaining: row.cdkType === 'timed' ? null : row.remainingUses,
+    total: row.cdkType === 'timed' ? null : row.totalUses,
     countryCode: row.countryCode ?? undefined,
     pools,
-  })
+  }
+
+  // 有进行中的订单 → 会话恢复（count 和 timed 均支持）
+  if (stillActive.length > 0) {
+    const activeOrderId = stillActive[0].id
+    const [activeOrder] = await db.select().from(orders).where(eq(orders.id, activeOrderId))
+
+    if (!activeOrder) {
+      return c.json(baseResponse)
+    }
+
+    // 已收到短信则附带最新短信
+    let smsContent: string | null = null
+    let verificationCode: string | null = null
+    if (activeOrder.status === 'received') {
+      const [latestSms] = await db
+        .select()
+        .from(orderSms)
+        .where(eq(orderSms.orderId, activeOrderId))
+        .orderBy(sql`${orderSms.receivedAt} DESC`)
+        .limit(1)
+      smsContent = latestSms?.smsContent ?? activeOrder.smsContent
+      verificationCode = latestSms?.verificationCode ?? activeOrder.verificationCode
+    }
+
+    // canRetry：timed 看有效期，count 看剩余次数
+    const canRetry =
+      row.cdkType === 'timed'
+        ? !!activeOrder.expiresAt && activeOrder.expiresAt > now
+        : row.remainingUses > 0
+
+    return c.json({
+      ...baseResponse,
+      activeOrder: {
+        orderId: activeOrder.id,
+        status: activeOrder.status,
+        phoneNumber: activeOrder.phoneNumber,
+        expiresAt: activeOrder.expiresAt,
+        smsContent,
+        verificationCode,
+        canRetry,
+        changeCount: activeOrder.changeCount,
+        orderedAt: activeOrder.orderedAt,
+      },
+    })
+  }
+
+  return c.json(baseResponse)
 })
 
 // ─── POST /api/cdk/order ─────────────────────────────────────────────────────
@@ -277,6 +387,8 @@ app.post('/validate', async (c) => {
 app.post('/order', async (c) => {
   const body = await c.req.json<{ cdkId: string; serviceId?: string; fromOrderId?: string }>()
   const db = getDb(c.env.DB)
+
+  const ip = c.req.header('CF-Connecting-IP') ?? c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ?? 'unknown'
 
   const [cdkRow] = await db
     .select({
@@ -286,6 +398,8 @@ app.post('/order', async (c) => {
       categoryId: cdks.categoryId,
       serviceId: cdks.serviceId,
       countryCode: cdks.countryCode,
+      cdkType: cdks.cdkType,
+      validityMinutes: cdks.validityMinutes,
     })
     .from(cdks)
     .where(eq(cdks.id, body.cdkId))
@@ -298,29 +412,29 @@ app.post('/order', async (c) => {
     return c.json({ error: 'CDK 已停用' }, 400)
   }
 
-  if (cdkRow.remainingUses === 0 || cdkRow.cdkStatus === 'exhausted') {
+  if (cdkRow.cdkType !== 'timed' && (cdkRow.remainingUses === 0 || cdkRow.cdkStatus === 'exhausted')) {
     return c.json({ error: 'CDK 次数已用完' }, 400)
+  }
+
+  if (cdkRow.cdkType === 'timed' && cdkRow.cdkStatus === 'exhausted') {
+    return c.json({ error: 'CDK 已过期，无法继续使用' }, 400)
   }
 
   const checkNow = new Date().toISOString()
   const activeOrders2 = await db
-    .select({ id: orders.id, expiresAt: orders.expiresAt })
+    .select({ id: orders.id, expiresAt: orders.expiresAt, status: orders.status })
     .from(orders)
     .where(and(
       eq(orders.cdkId, body.cdkId),
       or(eq(orders.status, 'pending'), eq(orders.status, 'received')),
     ))
 
-  const expiredIds2 = activeOrders2
-    .filter(o => o.expiresAt && o.expiresAt < checkNow)
-    .map(o => o.id)
-  if (expiredIds2.length > 0) {
-    await Promise.all(
-      expiredIds2.map(id => db.update(orders).set({ status: 'expired' }).where(eq(orders.id, id))),
-    )
+  const expiredOrders2 = activeOrders2.filter(o => o.expiresAt && o.expiresAt < checkNow)
+  for (const eo of expiredOrders2) {
+    await expireOrder(db, eo.id, eo.status, body.cdkId, cdkRow.cdkType, checkNow)
   }
 
-  const stillActive2 = activeOrders2.filter(o => !expiredIds2.includes(o.id))
+  const stillActive2 = activeOrders2.filter(o => !expiredOrders2.some(e => e.id === o.id))
   if (stillActive2.length > 0) {
     return c.json({ error: 'CDK 正在使用中，请等待当前流程完成' }, 400)
   }
@@ -339,7 +453,6 @@ app.post('/order', async (c) => {
   let serviceRow: ServiceRow | undefined
 
   if (body.serviceId) {
-    // 前端明确指定 serviceId：校验其属于该 CDK 的 category
     const serviceMetas = await getServiceMetas(db, { categoryId: cdkRow.categoryId, serviceId: cdkRow.serviceId })
     const isValid = serviceMetas.some(s => s.id === body.serviceId)
     if (!isValid) {
@@ -361,7 +474,6 @@ app.post('/order', async (c) => {
       .where(eq(services.id, body.serviceId))
     serviceRow = found
   } else if (cdkRow.categoryId) {
-    // 新 CDK：从 category 取 isDefault=true 的 service
     const [found] = await db
       .select({
         id: services.id,
@@ -396,7 +508,6 @@ app.post('/order', async (c) => {
       serviceRow = found
     }
   } else {
-    // 旧 CDK：直接用 service_id
     const [legacy] = await db
       .select({
         id: services.id,
@@ -417,7 +528,7 @@ app.post('/order', async (c) => {
     return c.json({ error: '找不到可用的服务提供商，请联系管理员' }, 500)
   }
 
-  // 插入 pending 订单（记录 service_id）
+  // 插入 pending 订单
   const orderId = crypto.randomUUID()
   const now = new Date().toISOString()
 
@@ -428,6 +539,7 @@ app.post('/order', async (c) => {
     status: 'pending',
     createdAt: now,
     fromOrderId: body.fromOrderId ?? null,
+    ipAddress: ip,
   })
 
   try {
@@ -442,21 +554,24 @@ app.post('/order', async (c) => {
       officialServiceCode: serviceRow.smsbowerServiceCode ?? undefined,
     })
 
-    const expiresAt = new Date(Date.now() + result.expiresIn * 1000).toISOString()
+    // timed CDK：有效期从取号时刻重新计算；count CDK：使用运营商返回的 expiresIn
+    const expiresAt = cdkRow.cdkType === 'timed' && cdkRow.validityMinutes
+      ? new Date(Date.now() + cdkRow.validityMinutes * 60_000).toISOString()
+      : new Date(Date.now() + result.expiresIn * 1000).toISOString()
 
     await db
       .update(orders)
       .set({ externalOrderId: result.orderId, phoneNumber: result.phoneNumber, expiresAt, orderedAt: now })
       .where(eq(orders.id, orderId))
 
-    return c.json({ orderId, phoneNumber: result.phoneNumber, expiresIn: result.expiresIn, changeCount: 0, orderedAt: now })
+    return c.json({ orderId, phoneNumber: result.phoneNumber, expiresIn: result.expiresIn, expiresAt, changeCount: 0, orderedAt: now })
   } catch (err) {
+    const message = err instanceof Error ? err.message : '获取号码失败，请稍后重试'
     await db
       .update(orders)
-      .set({ status: 'cancelled' })
+      .set({ status: 'cancelled', errorMessage: message, completedAt: now })
       .where(eq(orders.id, orderId))
 
-    const message = err instanceof Error ? err.message : '获取号码失败，请稍后重试'
     return c.json({ error: message }, 400)
   }
 })
@@ -488,9 +603,25 @@ app.get('/order/:orderId/status', async (c) => {
     return c.json({ status: order.status })
   }
 
-  // 已处于 received 状态：返回最新一条 order_sms 给前端（无需再轮询上游）
+  const nowStr = new Date().toISOString()
+
+  // 已处于 received 状态
   if (order.status === 'received') {
-    const [cdkRow] = await db.select({ remainingUses: cdks.remainingUses }).from(cdks).where(eq(cdks.id, order.cdkId))
+    const [cdkData] = await db
+      .select({ remainingUses: cdks.remainingUses, cdkType: cdks.cdkType })
+      .from(cdks)
+      .where(eq(cdks.id, order.cdkId))
+
+    // timed CDK：检查本地过期
+    if (cdkData?.cdkType === 'timed') {
+      if (order.expiresAt && order.expiresAt < nowStr) {
+        // received 状态到期 → CDK exhausted
+        await db.update(cdks).set({ status: 'exhausted' }).where(eq(cdks.id, order.cdkId))
+        await db.update(orders).set({ status: 'expired', completedAt: nowStr }).where(eq(orders.id, orderId))
+        return c.json({ status: 'expired' })
+      }
+    }
+
     const [latestSms] = await db
       .select()
       .from(orderSms)
@@ -498,12 +629,39 @@ app.get('/order/:orderId/status', async (c) => {
       .orderBy(sql`${orderSms.receivedAt} DESC`)
       .limit(1)
 
+    const canRetry = cdkData?.cdkType === 'timed'
+      ? (!!order.expiresAt && order.expiresAt > nowStr)
+      : (cdkData?.remainingUses ?? 0) > 0
+
     return c.json({
       status: 'received',
       smsContent: latestSms?.smsContent ?? order.smsContent ?? '',
       verificationCode: latestSms?.verificationCode ?? order.verificationCode ?? '',
-      canRetry: (cdkRow?.remainingUses ?? 0) > 0,
+      canRetry,
     })
+  }
+
+  // pending 状态：先检查本地过期（避免 timed CDK 依赖运营商侧的过期）
+  if (order.expiresAt && order.expiresAt < nowStr) {
+    const [cdkData] = await db
+      .select({ cdkType: cdks.cdkType })
+      .from(cdks)
+      .where(eq(cdks.id, order.cdkId))
+
+    if (cdkData?.cdkType === 'timed') {
+      // pending 到期（0 条短信）→ CDK 回到 active，尽力取消上游号码
+      if (order.externalOrderId) {
+        const providerSlug = await resolveProviderSlug(db, order)
+        if (providerSlug) {
+          const adapter = getProvider(providerSlug, getApiKey(providerSlug, c.env))
+          await adapter.cancelOrder(order.externalOrderId).catch(() => {})
+        }
+      }
+      // CDK 状态不变（仍为 active）
+    }
+
+    await db.update(orders).set({ status: 'expired', completedAt: nowStr }).where(eq(orders.id, orderId))
+    return c.json({ status: 'expired' })
   }
 
   if (!order.externalOrderId) {
@@ -522,8 +680,7 @@ app.get('/order/:orderId/status', async (c) => {
 
     // SMSBower：收到短信（received）
     if (pollResult.status === 'received') {
-      // 幂等判断：只有 order 当前是 pending 时才写记录 + 扣减
-      // （retry 会把 order 设回 pending，所以每次新收到都是 pending → received）
+      // 写入 order_sms 记录
       const smsId = crypto.randomUUID()
       await db.insert(orderSms).values({
         id: smsId,
@@ -533,7 +690,6 @@ app.get('/order/:orderId/status', async (c) => {
         receivedAt: now,
       })
 
-      // 同步写入 order 表（方便 CDK 详情快速读取最新短信）
       await db
         .update(orders)
         .set({
@@ -543,22 +699,31 @@ app.get('/order/:orderId/status', async (c) => {
         })
         .where(eq(orders.id, orderId))
 
-      // 扣减 CDK 次数
+      // 获取 CDK 信息决定扣减逻辑
       const [cdk] = await db.select().from(cdks).where(eq(cdks.id, order.cdkId))
-      let newRemaining = cdk?.remainingUses ?? 0
-      if (cdk) {
-        newRemaining = Math.max(0, cdk.remainingUses - 1)
-        await db
-          .update(cdks)
-          .set({ remainingUses: newRemaining, status: newRemaining === 0 ? 'exhausted' : cdk.status })
-          .where(eq(cdks.id, order.cdkId))
+      let canRetry: boolean
+
+      if (cdk?.cdkType === 'timed') {
+        // 时效型 CDK：不扣次数，canRetry = expiresAt > now
+        canRetry = !!order.expiresAt && order.expiresAt > now
+      } else {
+        // 按次型 CDK：扣减次数
+        let newRemaining = cdk?.remainingUses ?? 0
+        if (cdk) {
+          newRemaining = Math.max(0, cdk.remainingUses - 1)
+          await db
+            .update(cdks)
+            .set({ remainingUses: newRemaining, status: newRemaining === 0 ? 'exhausted' : cdk.status })
+            .where(eq(cdks.id, order.cdkId))
+        }
+        canRetry = newRemaining > 0
       }
 
       return c.json({
         status: 'received',
         smsContent: pollResult.smsContent,
         verificationCode: pollResult.verificationCode,
-        canRetry: newRemaining > 0,
+        canRetry,
       })
     }
 
@@ -573,8 +738,9 @@ app.get('/order/:orderId/status', async (c) => {
         })
         .where(eq(orders.id, orderId))
 
+      // 按次型 CDK 扣减（completed 路径）
       const [cdk] = await db.select().from(cdks).where(eq(cdks.id, order.cdkId))
-      if (cdk) {
+      if (cdk && cdk.cdkType !== 'timed') {
         const newRemaining = Math.max(0, cdk.remainingUses - 1)
         await db
           .update(cdks)
@@ -589,12 +755,34 @@ app.get('/order/:orderId/status', async (c) => {
       })
     }
 
-    if (pollResult.status === 'expired' || pollResult.status === 'cancelled') {
+    if (pollResult.status === 'expired') {
+      // 区分 timed 型两种路径
+      const [cdk] = await db.select({ cdkType: cdks.cdkType }).from(cdks).where(eq(cdks.id, order.cdkId))
+
+      if (cdk?.cdkType === 'timed') {
+        const [smsCount] = await db
+          .select({ count: sql<number>`count(*)`.as('count') })
+          .from(orderSms)
+          .where(eq(orderSms.orderId, orderId))
+        // pending 到期 0 条 → active（不变），received 到期 ≥1 条 → exhausted
+        if ((smsCount?.count ?? 0) > 0) {
+          await db.update(cdks).set({ status: 'exhausted' }).where(eq(cdks.id, order.cdkId))
+        }
+      }
+
       await db
         .update(orders)
-        .set({ status: pollResult.status })
+        .set({ status: 'expired', completedAt: now })
         .where(eq(orders.id, orderId))
-      return c.json({ status: pollResult.status })
+      return c.json({ status: 'expired' })
+    }
+
+    if (pollResult.status === 'cancelled') {
+      await db
+        .update(orders)
+        .set({ status: 'cancelled', completedAt: now })
+        .where(eq(orders.id, orderId))
+      return c.json({ status: 'cancelled' })
     }
 
     return c.json({ status: 'pending', timeLeft: pollResult.timeLeft })
@@ -622,10 +810,22 @@ app.post('/order/:orderId/retry', async (c) => {
     return c.json({ error: '订单缺少外部 ID' }, 400)
   }
 
-  // 检查 CDK 还有剩余次数
-  const [cdk] = await db.select({ remainingUses: cdks.remainingUses }).from(cdks).where(eq(cdks.id, order.cdkId))
-  if (!cdk || cdk.remainingUses <= 0) {
-    return c.json({ error: 'CDK 次数已用完，无法再发' }, 400)
+  const [cdk] = await db
+    .select({ remainingUses: cdks.remainingUses, cdkType: cdks.cdkType })
+    .from(cdks)
+    .where(eq(cdks.id, order.cdkId))
+
+  if (cdk?.cdkType === 'timed') {
+    // 时效型：检查有效期
+    const now = new Date().toISOString()
+    if (order.expiresAt && order.expiresAt < now) {
+      return c.json({ error: 'CDK 有效期已到，无法再发' }, 400)
+    }
+  } else {
+    // 按次型：检查剩余次数
+    if (!cdk || cdk.remainingUses <= 0) {
+      return c.json({ error: 'CDK 次数已用完，无法再发' }, 400)
+    }
   }
 
   const providerSlug = await resolveProviderSlug(db, order)
@@ -637,7 +837,6 @@ app.post('/order/:orderId/retry', async (c) => {
     const adapter = getProvider(providerSlug, getApiKey(providerSlug, c.env))
     await adapter.retryOrder(order.externalOrderId)
 
-    // 订单回退到 pending，继续轮询
     await db
       .update(orders)
       .set({ status: 'pending' })
@@ -675,7 +874,6 @@ app.post('/order/:orderId/finish', async (c) => {
 
   try {
     const adapter = getProvider(providerSlug, getApiKey(providerSlug, c.env))
-    // 尽力调用 confirmOrder（忽略失败）
     await adapter.confirmOrder(order.externalOrderId).catch((err: unknown) =>
       console.warn(`[finish] confirmOrder failed for order ${orderId}:`, err),
     )
@@ -685,6 +883,15 @@ app.post('/order/:orderId/finish', async (c) => {
       .update(orders)
       .set({ status: 'completed', completedAt: now })
       .where(eq(orders.id, orderId))
+
+    // 时效型 CDK：手动完成 → 标为 exhausted
+    const [cdk] = await db
+      .select({ cdkType: cdks.cdkType })
+      .from(cdks)
+      .where(eq(cdks.id, order.cdkId))
+    if (cdk?.cdkType === 'timed') {
+      await db.update(cdks).set({ status: 'exhausted' }).where(eq(cdks.id, order.cdkId))
+    }
 
     return c.json({ success: true })
   } catch (err) {
@@ -700,7 +907,6 @@ app.post('/order/:orderId/cancel', async (c) => {
   const orderId = c.req.param('orderId')
   const db = getDb(c.env.DB)
 
-  // 可选的取消原因：user_cancelled（主动取消）/ user_switched_pool（切换运营商）
   const body = await c.req.json<{ reason?: string }>().catch(() => ({ reason: undefined }))
   const cancelledReason = body.reason ?? 'user_cancelled'
 
@@ -715,7 +921,6 @@ app.post('/order/:orderId/cancel', async (c) => {
     return c.json({ error: '订单缺少外部 ID' }, 400)
   }
 
-  // 检查 2 分钟冷却（EARLY_CANCEL_DENIED 限制）
   if (order.orderedAt) {
     const elapsedMs = Date.now() - new Date(order.orderedAt).getTime()
     if (elapsedMs < 2 * 60 * 1000) {
@@ -731,7 +936,6 @@ app.post('/order/:orderId/cancel', async (c) => {
 
   try {
     const adapter = getProvider(providerSlug, getApiKey(providerSlug, c.env))
-    // 切换运营商时尽力取消（忽略失败），普通取消失败则报错
     if (cancelledReason === 'user_switched_pool') {
       await adapter.cancelOrder(order.externalOrderId).catch((err: unknown) =>
         console.warn(`[cancel] cancelOrder failed for order ${orderId} (switch):`, err),
@@ -774,7 +978,6 @@ app.post('/order/:orderId/change', async (c) => {
     return c.json({ error: '已达换号上限（最多换号 2 次）' }, 400)
   }
 
-  // 检查 2 分钟冷却
   if (order.orderedAt) {
     const elapsedMs = Date.now() - new Date(order.orderedAt).getTime()
     if (elapsedMs < 2 * 60 * 1000) {
@@ -801,16 +1004,16 @@ app.post('/order/:orderId/change', async (c) => {
     return c.json({ error: '无法确定服务提供商' }, 500)
   }
 
-  // 查 CDK 的 countryCode
-  const [cdkRow] = await db.select({ countryCode: cdks.countryCode }).from(cdks).where(eq(cdks.id, order.cdkId))
+  const [cdkRow] = await db
+    .select({ countryCode: cdks.countryCode, cdkType: cdks.cdkType, validityMinutes: cdks.validityMinutes })
+    .from(cdks)
+    .where(eq(cdks.id, order.cdkId))
 
   try {
     const adapter = getProvider(serviceRow.providerSlug, getApiKey(serviceRow.providerSlug, c.env))
 
-    // 1. 取消旧号码
     await adapter.cancelOrder(order.externalOrderId)
 
-    // 2. 取新号码
     const result = await adapter.orderNumber(serviceRow.externalServiceId!, {
       maxPrice: serviceRow.maxPrice!,
       successRateThreshold: serviceRow.successRateThreshold!,
@@ -820,7 +1023,12 @@ app.post('/order/:orderId/change', async (c) => {
     })
 
     const now = new Date().toISOString()
-    const expiresAt = new Date(Date.now() + result.expiresIn * 1000).toISOString()
+
+    // timed CDK：换号后 expiresAt 重置
+    const expiresAt = cdkRow?.cdkType === 'timed' && cdkRow.validityMinutes
+      ? new Date(Date.now() + cdkRow.validityMinutes * 60_000).toISOString()
+      : new Date(Date.now() + result.expiresIn * 1000).toISOString()
+
     const newChangeCount = order.changeCount + 1
 
     await db
@@ -839,6 +1047,7 @@ app.post('/order/:orderId/change', async (c) => {
     return c.json({
       phoneNumber: result.phoneNumber,
       expiresIn: result.expiresIn,
+      expiresAt,
       changeCount: newChangeCount,
       orderedAt: now,
     })

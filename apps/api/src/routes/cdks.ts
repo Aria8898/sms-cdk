@@ -47,6 +47,8 @@ app.get('/', async (c) => {
       remainingUses: cdks.remainingUses,
       status: cdks.status,
       createdAt: cdks.createdAt,
+      cdkType: cdks.cdkType,
+      validityMinutes: cdks.validityMinutes,
       serviceName: sql<string>`COALESCE(${serviceCategories.name}, ${services.name})`.as('service_name'),
       hasPendingOrder: sql<number>`
         CASE WHEN EXISTS (
@@ -80,6 +82,8 @@ app.post('/generate', async (c) => {
     usesPerCdk: number
     quantity: number
     countryCode?: string
+    cdkType?: 'count' | 'timed'
+    validityMinutes?: number
   }>()
 
   const db = getDb(c.env.DB)
@@ -115,6 +119,10 @@ app.post('/generate', async (c) => {
 
   const serviceId = fallbackService.id
   const countryCode = body.countryCode?.trim().toUpperCase() || undefined
+  const cdkType = body.cdkType ?? 'count'
+  const validityMinutes = cdkType === 'timed' ? (body.validityMinutes ?? 60) : null
+  // 时效型 CDK usesPerCdk 无实际意义，统一存 1
+  const usesPerCdk = cdkType === 'timed' ? 1 : Math.max(1, body.usesPerCdk ?? 1)
 
   const createdAt = new Date().toISOString()
   const newCdks = []
@@ -128,10 +136,12 @@ app.post('/generate', async (c) => {
       serviceId,
       categoryId: body.categoryId,
       countryCode: countryCode ?? null,
-      totalUses: body.usesPerCdk,
-      remainingUses: body.usesPerCdk,
+      totalUses: usesPerCdk,
+      remainingUses: usesPerCdk,
       status: 'active',
       createdAt,
+      cdkType,
+      validityMinutes,
     })
   }
 
