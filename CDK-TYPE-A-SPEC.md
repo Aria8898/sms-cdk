@@ -116,6 +116,11 @@ active（可使用）
 | `cdks` | `cdk_type TEXT NOT NULL DEFAULT 'count'` | 枚举：`count` / `timed` |
 | `cdks` | `validity_minutes INTEGER` | 仅 timed 类型有效，生成时填入 |
 | `orders` | `expires_at`（已存在） | timed 类型改为从 CDK 配置计算，不再使用运营商返回的 expiresIn |
+| `orders` | `error_message TEXT` | 取号失败时记录 provider 返回的错误信息；失败订单也需写入记录 |
+| `orders` | `cost DECIMAL` | 取号时从 provider API 响应中读取并存储当次价格，用于花费统计 |
+| `orders` | `ip_address TEXT` | 下单时记录客户端 IP，用于安全溯源和滥用检测 |
+| `orders` | `completed_at TIMESTAMP` | 订单进入终态（completed / expired / cancelled）的时间，用于等待时长统计 |
+| `login_attempts`（新表） | `id, ip_address, success BOOLEAN, created_at` | 记录所有登录尝试（含失败），用于限频判断和安全审计 |
 
 ---
 
@@ -123,11 +128,19 @@ active（可使用）
 
 | 接口 | 变更内容 |
 |------|----------|
-| `POST /api/cdk/validate` | ① 正常响应新增 `cdkType`、`expiresAt`；② 检测进行中订单时返回 `activeOrder`；③ 已过期时错误响应新增 `expiresAt`、`lastOrderedAt` |
-| `POST /api/cdk/order` | timed 类型：`expiresAt = now + validity_minutes × 60s` |
+| `POST /api/cdk/validate` | ① 正常响应新增 `cdkType`、`expiresAt`；② 检测进行中订单时返回 `activeOrder`；③ 已过期时错误响应新增 `expiresAt`、`lastOrderedAt`；④ **IP 限频 10 次/分钟，超限返回 429**，阈值通过 `RATE_LIMIT_VALIDATE`（env var）配置 |
+| `POST /api/cdk/order` | timed 类型：`expiresAt = now + validity_minutes × 60s`；写入 `ip_address`、`completed_at`（终态时更新） |
 | `POST /api/cdk/order/:id/change` | timed 类型：同步重置 `expiresAt = now + validity_minutes × 60s` |
-| `GET /api/cdk/order/:id/status` | timed 类型：`canRetry = expiresAt > now`（不检查 remainingUses）；`expired` 路径区分两种情况（见状态流转） |
+| `GET /api/cdk/order/:id/status` | timed 类型：`canRetry = expiresAt > now`（不检查 remainingUses）；`expired` 路径区分两种情况（见状态流转）；终态时写入 `completed_at` |
+| `POST /api/auth/login` | **IP 限频 5 次/分钟，连续失败超限后封禁 15 分钟，返回 429**；每次尝试写入 `login_attempts` 表 |
 | `POST /admin/cdks/generate` | 新增 `cdkType`（`count`/`timed`）和 `validityMinutes` 参数 |
+
+**新增 Env Var：**
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `RATE_LIMIT_VALIDATE` | `10` | validate 接口每分钟每 IP 最大请求次数 |
+| `NOTIFY_WEBHOOK_URL` | （空） | 预留：登录异常通知 Webhook，留空则不通知；二期填入即可激活主动告警 |
 
 **validate 正常响应示例（timed 型，无进行中订单）：**
 
@@ -185,3 +198,4 @@ active（可使用）
 |------|------|
 | CDK 生成页 | 新增类型选择（按次 / 时效）；时效型额外填写有效分钟数 |
 | CDK 列表 | 新增类型列，显示"按次"或"时效 XX 分钟" |
+| 安全日志页 | 展示 `login_attempts` 记录：IP / 成功或失败 / 时间；支持按失败筛选，便于发现异常登录尝试 |
