@@ -17,6 +17,52 @@ function flattenCategories(cats: ServiceCategory[]): FlatService[] {
 
 type TabValue = 'all' | 'qualified' | 'blocked'
 
+// ─── SessionStorage 缓存（按 serviceId 隔离，tab 关闭自动清除）────────────────
+
+const STORAGE_KEY_LAST = 'pool-monitor-last'
+
+function cacheKey(serviceId: string) {
+  return `pool-monitor-cache-${serviceId}`
+}
+
+interface CachedEntry {
+  result: PoolStatusResult
+  queriedAt: string   // ISO string
+}
+
+function persistResult(serviceId: string, result: PoolStatusResult): void {
+  try {
+    const entry: CachedEntry = { result, queriedAt: new Date().toISOString() }
+    sessionStorage.setItem(cacheKey(serviceId), JSON.stringify(entry))
+  } catch {}
+}
+
+function restoreResult(serviceId: string): CachedEntry | null {
+  try {
+    const raw = sessionStorage.getItem(cacheKey(serviceId))
+    return raw ? (JSON.parse(raw) as CachedEntry) : null
+  } catch { return null }
+}
+
+function persistSelection(providerId: string, serviceId: string): void {
+  try {
+    sessionStorage.setItem(STORAGE_KEY_LAST, JSON.stringify({ providerId, serviceId }))
+  } catch {}
+}
+
+function restoreSelection(): { providerId: string; serviceId: string } | null {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY_LAST)
+    return raw ? (JSON.parse(raw) as { providerId: string; serviceId: string }) : null
+  } catch { return null }
+}
+
+function formatTime(iso: string): string {
+  const d = new Date(iso)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
 // ─── Rank 说明卡片 ────────────────────────────────────────────────────────────
 
 function RankLegend() {
@@ -60,78 +106,174 @@ function BowerRankBadge({ rank }: { rank?: 'Gold' | 'Silver' | 'Bronze' }) {
   )
 }
 
-function BowerTable({ positions }: { positions: BowerPosition[] }) {
-  if (positions.length === 0) {
+function BowerStrategyBadge({ pos, maxPrice }: { pos: BowerPosition; maxPrice: number }) {
+  if (pos.blocked) {
     return (
-      <div className="bg-white rounded-xl border border-gray-200 py-16 text-center text-gray-400 text-sm">
-        暂无号池数据
-      </div>
+      <span className="inline-flex items-center px-2 py-0.5 bg-orange-100 text-orange-700 rounded text-xs font-medium">
+        已屏蔽
+      </span>
     )
   }
+  if (pos.qualifies) {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs font-medium">
+        符合策略
+      </span>
+    )
+  }
+  const reasons: string[] = []
+  if (pos.rank === 'Bronze') reasons.push('Bronze 兜底')
+  if (pos.price > maxPrice) reasons.push(`价格超限 ($${pos.price.toFixed(3)} > $${maxPrice.toFixed(3)})`)
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      <span className="inline-flex items-center px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+        不符合
+      </span>
+      {reasons.map(r => (
+        <span key={r} className="text-xs text-gray-400">{r}</span>
+      ))}
+    </div>
+  )
+}
+
+function BowerView({ result }: {
+  result: Extract<PoolStatusResult, { providerSlug: 'smsbower' }>
+}) {
+  const [tab, setTab] = useState<TabValue>('all')
+
+  const displayPositions: BowerPosition[] = tab === 'qualified'
+    ? result.positions.filter(p => p.qualifies)
+    : tab === 'blocked'
+    ? result.positions.filter(p => p.blocked).sort((a, b) => a.shortName.localeCompare(b.shortName))
+    : result.positions  // 全部：使用后端已排序结果
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="bg-gray-50 border-b border-gray-200">
-            <th className="text-left px-5 py-3 font-medium text-gray-600">国家</th>
-            <th className="text-right px-5 py-3 font-medium text-gray-600">交付率</th>
-            <th className="text-left px-5 py-3 font-medium text-gray-600">等级</th>
-            <th className="text-left px-5 py-3 font-medium text-gray-600">供应商 ID</th>
-            <th className="text-right px-5 py-3 font-medium text-gray-600">库存</th>
-            <th className="text-right px-5 py-3 font-medium text-gray-600">价格</th>
-          </tr>
-        </thead>
-        <tbody>
-          {positions.map((pos, i) => (
-            <tr key={i} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-              <td className="px-5 py-3">
-                <div className="font-medium text-gray-900">{pos.name}</div>
-                <div className="text-xs text-gray-400 font-mono">{pos.shortName}</div>
-              </td>
-              <td className="px-5 py-3 text-right">
-                {(pos.successRate ?? 0) > 0 ? (
-                  <div className="flex items-center justify-end gap-2">
-                    <div className="w-16 bg-gray-100 rounded-full h-1.5">
-                      <div
-                        className={`h-1.5 rounded-full ${
-                          pos.successRate >= 80 ? 'bg-yellow-400' :
-                          pos.successRate >= 60 ? 'bg-gray-400' : 'bg-orange-400'
-                        }`}
-                        style={{ width: `${Math.min(pos.successRate ?? 0, 100)}%` }}
-                      />
+    <>
+      {/* V3 降级提示 */}
+      {result.dataSource === 'v3' && (
+        <div className="mb-4 flex items-center gap-2 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
+          <span className="font-medium">注意</span>
+          <span>当前数据来自降级路径（V3），交付率不可用，建议强制刷新重试</span>
+        </div>
+      )}
+
+      {/* 摘要卡片 */}
+      <div className="grid grid-cols-5 gap-4 mb-6">
+        <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
+          <div className="text-xs text-gray-500 mb-1">当前策略</div>
+          <div className="text-sm font-medium text-gray-900">等级 Gold / Silver</div>
+          <div className="text-sm font-medium text-gray-900">
+            价格 ≤ ${result.service.maxPrice.toFixed(3)}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
+          <div className="text-xs text-gray-500 mb-1">可用国家</div>
+          <div className="text-2xl font-semibold text-gray-900">{result.summary.total}</div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
+          <div className="text-xs text-gray-500 mb-1">符合策略</div>
+          <div className="text-2xl font-semibold text-green-600">{result.summary.qualified}</div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
+          <div className="text-xs text-gray-500 mb-1">已屏蔽</div>
+          <div className="text-2xl font-semibold text-orange-500">{result.summary.blocked}</div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
+          <div className="text-xs text-gray-500 mb-1">优选国家（前3）</div>
+          <div className="flex gap-1 mt-1 flex-wrap">
+            {result.summary.topPicks.length > 0
+              ? result.summary.topPicks.map((p, i) => (
+                  <span key={p} className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-medium">
+                    #{i + 1} {p}
+                  </span>
+                ))
+              : <span className="text-sm text-gray-400">无</span>
+            }
+          </div>
+        </div>
+      </div>
+
+      {/* Tab 切换 */}
+      <div className="flex gap-1 mb-4 bg-gray-100 rounded-lg p-1 w-fit">
+        {([
+          ['all',       `全部 (${result.summary.total})`],
+          ['qualified', `符合策略 (${result.summary.qualified})`],
+          ['blocked',   `已屏蔽 (${result.summary.blocked})`],
+        ] as [TabValue, string][]).map(([value, label]) => (
+          <button
+            key={value}
+            onClick={() => setTab(value)}
+            className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+              tab === value ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* 数据表格 */}
+      {displayPositions.length === 0 ? (
+        <div className="bg-white rounded-xl border border-gray-200 py-16 text-center text-gray-400 text-sm">
+          {tab === 'qualified' ? '当前没有符合策略的 position' : tab === 'blocked' ? '当前没有屏蔽的国家' : '暂无号池数据'}
+        </div>
+      ) : (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-200">
+                <th className="text-left px-5 py-3 font-medium text-gray-600">国家</th>
+                <th className="text-left px-5 py-3 font-medium text-gray-600">等级</th>
+                <th className="text-left px-5 py-3 font-medium text-gray-600">供应商 ID</th>
+                <th className="text-right px-5 py-3 font-medium text-gray-600">库存</th>
+                <th className="text-right px-5 py-3 font-medium text-gray-600">价格</th>
+                <th className="text-left px-5 py-3 font-medium text-gray-600">策略状态</th>
+              </tr>
+            </thead>
+            <tbody>
+              {displayPositions.map((pos, i) => (
+                <tr
+                  key={i}
+                  className={`border-b border-gray-100 transition-colors ${
+                    pos.blocked ? 'bg-orange-50 hover:bg-orange-100' : 'hover:bg-gray-50'
+                  }`}
+                >
+                  <td className="px-5 py-3">
+                    <div className="font-medium text-gray-900">{pos.name}</div>
+                    <div className="text-xs text-gray-400 font-mono">{pos.shortName}</div>
+                  </td>
+                  <td className="px-5 py-3">
+                    <BowerRankBadge rank={pos.rank} />
+                  </td>
+                  <td className="px-5 py-3">
+                    <div className="flex flex-wrap gap-1">
+                      {(pos.agentIds ?? []).map(id => (
+                        <span key={id} className="font-mono text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">
+                          {id}
+                        </span>
+                      ))}
                     </div>
-                    <span className="text-gray-700 font-medium w-10 text-right tabular-nums">
-                      {pos.successRate}%
-                    </span>
-                  </div>
-                ) : (
-                  <span className="text-gray-400 text-xs">—</span>
-                )}
-              </td>
-              <td className="px-5 py-3">
-                <BowerRankBadge rank={pos.rank} />
-              </td>
-              <td className="px-5 py-3">
-                <div className="flex flex-wrap gap-1">
-                  {(pos.agentIds ?? []).map(id => (
-                    <span key={id} className="font-mono text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">
-                      {id}
-                    </span>
-                  ))}
-                </div>
-              </td>
-              <td className="px-5 py-3 text-right">
-                <StockBadge stock={pos.stock ?? 0} />
-              </td>
-              <td className="px-5 py-3 text-right font-mono text-gray-700">
-                ${(pos.price ?? 0).toFixed(2)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+                  </td>
+                  <td className="px-5 py-3 text-right">
+                    <StockBadge stock={pos.stock ?? 0} />
+                  </td>
+                  <td className="px-5 py-3 text-right font-mono text-gray-700">
+                    ${(pos.price ?? 0).toFixed(3)}
+                  </td>
+                  <td className="px-5 py-3">
+                    <BowerStrategyBadge pos={pos} maxPrice={result.service.maxPrice} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
   )
 }
 
@@ -293,6 +435,7 @@ export default function PoolMonitor() {
   const [selectedProviderId, setSelectedProviderId] = useState('')
   const [selectedServiceId, setSelectedServiceId] = useState('')
   const [result, setResult] = useState<PoolStatusResult | null>(null)
+  const [queriedAt, setQueriedAt] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [error, setError] = useState('')
@@ -307,11 +450,23 @@ export default function PoolMonitor() {
         const svcData = flattenCategories(cats)
         setProviders(provData)
         setServices(svcData)
-        if (provData.length > 0) {
-          const firstProvider = provData[0]
-          setSelectedProviderId(firstProvider.id)
-          const firstService = svcData.find(s => s.providerId === firstProvider.id)
-          if (firstService) setSelectedServiceId(firstService.id)
+
+        // 恢复上次选中的 provider / service，并加载对应缓存
+        const last = restoreSelection()
+        const validProvider = last && provData.find(p => p.id === last.providerId)
+        const pid = validProvider ? last!.providerId : (provData[0]?.id ?? '')
+        const validService = last && svcData.find(s => s.id === last.serviceId && s.providerId === pid)
+        const sid = validService ? last!.serviceId : (svcData.find(s => s.providerId === pid)?.id ?? '')
+
+        setSelectedProviderId(pid)
+        setSelectedServiceId(sid)
+
+        if (sid) {
+          const cached = restoreResult(sid)
+          if (cached) {
+            setResult(cached.result)
+            setQueriedAt(cached.queriedAt)
+          }
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : '加载失败')
@@ -322,16 +477,25 @@ export default function PoolMonitor() {
 
   function handleProviderChange(providerId: string) {
     setSelectedProviderId(providerId)
-    setResult(null)
     setError('')
     const firstService = services.find(s => s.providerId === providerId)
-    setSelectedServiceId(firstService?.id ?? '')
+    const sid = firstService?.id ?? ''
+    setSelectedServiceId(sid)
+    persistSelection(providerId, sid)
+
+    const cached = sid ? restoreResult(sid) : null
+    setResult(cached?.result ?? null)
+    setQueriedAt(cached?.queriedAt ?? null)
   }
 
   function handleServiceChange(serviceId: string) {
     setSelectedServiceId(serviceId)
-    setResult(null)
     setError('')
+    persistSelection(selectedProviderId, serviceId)
+
+    const cached = restoreResult(serviceId)
+    setResult(cached?.result ?? null)
+    setQueriedAt(cached?.queriedAt ?? null)
   }
 
   async function fetchPoolStatus(refresh = false) {
@@ -341,6 +505,9 @@ export default function PoolMonitor() {
     try {
       const data = await poolApi.status(selectedServiceId, refresh)
       setResult(data)
+      persistResult(selectedServiceId, data)
+      persistSelection(selectedProviderId, selectedServiceId)
+      setQueriedAt(new Date().toISOString())
     } catch (err) {
       setError(err instanceof Error ? err.message : '查询失败')
     } finally {
@@ -358,6 +525,9 @@ export default function PoolMonitor() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-xl font-semibold text-gray-900">号池监控</h2>
+        {queriedAt && (
+          <span className="text-xs text-gray-400">上次查询：{formatTime(queriedAt)}</span>
+        )}
       </div>
 
       {/* Rank 说明（SMSBower 时显示） */}
@@ -423,7 +593,7 @@ export default function PoolMonitor() {
       {/* 结果展示 */}
       {result && (
         result.providerSlug === 'smsbower'
-          ? <BowerTable positions={result.positions} />
+          ? <BowerView result={result} />
           : <SmsPoolView result={result} />
       )}
 

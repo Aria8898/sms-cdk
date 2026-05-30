@@ -147,17 +147,19 @@ export interface PoolCountry {
   strategyRank: number | null   // SMSPool 策略排名（第 1/2/3 优先取号）
 }
 
-/** SMSBower 供应商 position 条目 */
+/** SMSBower 供应商 position 条目（合并后） */
 export interface BowerPosition {
   countryId: number | string
   name: string
-  shortName: string
+  shortName: string       // ISO 码（如 'US'），V3 降级已做 bowerKey→ISO 转换
   price: number
   lowPrice: number
-  successRate: number      // 交付率 0-100（内部 API 有；V3 降级时为 0）
+  successRate: number     // 永远为 0（SMSBower 不提供数值交付率，以 rank 替代）
   stock: number
   rank?: 'Gold' | 'Silver' | 'Bronze'
   agentIds?: string[]
+  blocked: boolean        // 在 blockedCountries 中
+  qualifies: boolean      // 未屏蔽 + Gold/Silver + price ≤ maxPrice
 }
 
 /** 统一响应结构（通过 providerSlug 区分） */
@@ -173,7 +175,12 @@ export type PoolStatusResult =
     }
   | {
       providerSlug: 'smsbower'
-      service: { id: string; name: string; providerName: string; providerSlug: string }
+      dataSource: 'internal' | 'v3'   // internal=内部 API；v3=降级路径（无交付率）
+      service: {
+        id: string; name: string; providerName: string; providerSlug: string
+        maxPrice: number; blockedCountries: string[]
+      }
+      summary: { total: number; qualified: number; blocked: number; topPicks: string[] }
       positions: BowerPosition[]
     }
 

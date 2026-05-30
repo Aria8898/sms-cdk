@@ -77,20 +77,23 @@ function parseActivationTime(_value: string | number | undefined): number {
   return 1200  // 20 分钟
 }
 
-/**
- * ISO 2 字母码 → SMSBower 可能使用的国家 key（小写）
- * 仅列举常用国家，未匹配则返回 null
- */
+/** ISO 2 字母码 → SMSBower 国家 key（小写），用于内部 API 过滤 */
+const ISO_TO_BOWER_KEY: Record<string, string> = {
+  US: 'usa', RU: 'russia', CN: 'china', GB: 'england',
+  DE: 'germany', FR: 'france', IN: 'india', BR: 'brazil',
+  JP: 'japan', KR: 'south korea', VN: 'vietnam', ID: 'indonesia',
+  PH: 'philippines', NG: 'nigeria', KE: 'kenya',
+  SG: 'singapore', MY: 'malaysia', CA: 'canada', AU: 'australia',
+  MX: 'mexico',
+}
+
+/** V3 降级时 bower key（如 'usa'）→ ISO 码（如 'US'），用于 blockedCountries 匹配 */
+const BOWER_KEY_TO_ISO: Record<string, string> = Object.fromEntries(
+  Object.entries(ISO_TO_BOWER_KEY).map(([iso, key]) => [key, iso]),
+)
+
 function isoToSmsBowerKey(iso: string): string | null {
-  const MAP: Record<string, string> = {
-    US: 'usa', RU: 'russia', CN: 'china', GB: 'england',
-    DE: 'germany', FR: 'france', IN: 'india', BR: 'brazil',
-    JP: 'japan', KR: 'south korea', VN: 'vietnam', ID: 'indonesia',
-    PH: 'philippines', NG: 'nigeria', KE: 'kenya',
-    SG: 'singapore', MY: 'malaysia', CA: 'canada', AU: 'australia',
-    MX: 'mexico',
-  }
-  return MAP[iso.toUpperCase()] ?? null
+  return ISO_TO_BOWER_KEY[iso.toUpperCase()] ?? null
 }
 
 // ─── Official country list cache ──────────────────────────────────────────────
@@ -164,10 +167,16 @@ export class SmsBowerAdapter implements SmsProvider {
     return undefined
   }
 
-  // ─── getPoolStatus ──────────────────────────────────────────────────────────
+  // ─── getBowerPoolStatus / getPoolStatus ─────────────────────────────────────
   // 优先用内部 getPricesByService（含等级/交付率），降级到官方 getPricesV3
 
-  async getPoolStatus(externalServiceId: string): Promise<PoolCountryStatus[]> {
+  /**
+   * 获取号池数据并标注数据来源（internal / v3）。
+   * 供 pool 路由直接调用，携带 dataSource 用于前端展示降级提示。
+   */
+  async getBowerPoolStatus(
+    externalServiceId: string,
+  ): Promise<{ dataSource: 'internal' | 'v3'; positions: PoolCountryStatus[] }> {
     // 1. 尝试内部 API
     try {
       const url = `${INTERNAL_BASE}/getPricesByService?serviceId=${encodeURIComponent(externalServiceId)}&api_key=${encodeURIComponent(this.apiKey)}`
@@ -194,7 +203,7 @@ export class SmsBowerAdapter implements SmsProvider {
       if (result) {
         const countryCount = Object.values(result.services).reduce((n, s) => n + Object.keys(s.countries).length, 0)
         console.log(`[smsbower] 使用内部 API 数据，countries=${countryCount}`)
-        return this._parseInternalPrices(result)
+        return { dataSource: 'internal', positions: this._parseInternalPrices(result) }
       }
       console.warn('[smsbower] 内部 API 返回无效数据，降级到 getPricesV3')
     } catch (err) {
@@ -202,7 +211,13 @@ export class SmsBowerAdapter implements SmsProvider {
     }
 
     // 2. 降级：官方 getPricesV3
-    return this._fetchPricesV3(externalServiceId)
+    return { dataSource: 'v3', positions: await this._fetchPricesV3(externalServiceId) }
+  }
+
+  /** 实现 SmsProvider 接口；内部调用（如 orderNumber）走此方法 */
+  async getPoolStatus(externalServiceId: string): Promise<PoolCountryStatus[]> {
+    const { positions } = await this.getBowerPoolStatus(externalServiceId)
+    return positions
   }
 
   private _parseInternalPrices(data: InternalPricesResponse): PoolCountryStatus[] {
@@ -262,7 +277,7 @@ export class SmsBowerAdapter implements SmsProvider {
           positions.push({
             countryId: countryKey,
             name: titleCase(countryKey),
-            shortName: countryKey,
+            shortName: BOWER_KEY_TO_ISO[countryKey] ?? countryKey,
             price: parseFloat(String(entry.price)),
             lowPrice: parseFloat(String(entry.price)),
             successRate: 0,  // V3 不含交付率
