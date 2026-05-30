@@ -51,6 +51,8 @@ interface FlowData {
   smsHistory: SmsRecord[]
   changeCount: number
   orderedAt?: string
+  /** 切换运营商时记录上一个已取消/超时的订单 ID，用于新订单的链路追踪 */
+  previousOrderId?: string
 }
 
 const DEFAULT_DATA: FlowData = {
@@ -250,7 +252,7 @@ function ConfirmPanel({ data, onConfirm, onBack }: ConfirmPanelProps) {
     setIsLoading(true)
     setErrorMsg('')
     try {
-      const result = await cdkApi.createOrder(data.cdkId, selectedId)
+      const result = await cdkApi.createOrder(data.cdkId, selectedId, data.previousOrderId)
       onConfirm({
         orderId: result.orderId,
         phone: result.phoneNumber,
@@ -477,10 +479,18 @@ interface CardProps {
   stopTimer?: () => void
 }
 
+/** 从当前 pools 中挑一个不同于 currentId 的运营商；若只有一个则返回当前 */
+function pickAlternativePool(pools: PoolOption[], currentId?: string): PoolOption | undefined {
+  if (!pools.length) return undefined
+  const others = pools.filter(p => p.serviceId !== currentId)
+  return others.find(p => p.hasStock) ?? others[0] ?? pools[0]
+}
+
 function PhoneCard({ phase, data, onPhaseChange }: CardProps) {
   const [copied, setCopied] = useState(false)
   const [isCancelling, setIsCancelling] = useState(false)
   const [isChanging, setIsChanging] = useState(false)
+  const [isSwitching, setIsSwitching] = useState(false)
   const [actionError, setActionError] = useState('')
   const cooldownLeft = useCooldownSeconds(data.orderedAt)
 
@@ -525,8 +535,35 @@ function PhoneCard({ phase, data, onPhaseChange }: CardProps) {
     }
   }
 
+  /** waiting：先取消当前订单（reason=user_switched_pool），再跳回 confirm 并自动选另一个运营商 */
+  async function handleSwitchProvider() {
+    setIsSwitching(true)
+    setActionError('')
+    try {
+      if (phase === 'waiting' && data.orderId) {
+        // 尽力取消，失败不阻断切换
+        await cdkApi.cancelOrder(data.orderId, 'user_switched_pool').catch(() => {})
+      }
+      const alt = pickAlternativePool(data.pools ?? [], data.selectedServiceId)
+      onPhaseChange('confirm', {
+        selectedServiceId: alt?.serviceId,
+        previousOrderId: data.orderId,
+        // 清除会话相关字段
+        phone: undefined,
+        expiresIn: undefined,
+        secondsLeft: undefined,
+        sms: undefined,
+        code: undefined,
+        orderedAt: undefined,
+      })
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : '切换失败，请重试')
+      setIsSwitching(false)
+    }
+  }
+
   const isActive = phase === 'waiting' || phase === 'received'
-  const isBusy = isCancelling || isChanging
+  const isBusy = isCancelling || isChanging || isSwitching
   const changeExhausted = data.changeCount >= 2
   const inCooldown = cooldownLeft > 0
 
@@ -583,7 +620,7 @@ function PhoneCard({ phase, data, onPhaseChange }: CardProps) {
 
       <div className="flex-1" />
 
-      {/* waiting 阶段：取消 & 换号 */}
+      {/* waiting 阶段：取消 & 换号 & 切换运营商 */}
       {phase === 'waiting' && (
         <div className="space-y-2">
           {actionError && (
@@ -613,17 +650,37 @@ function PhoneCard({ phase, data, onPhaseChange }: CardProps) {
               {isChanging ? '换号中...' : changeExhausted ? '已达换号上限' : `换号（剩 ${2 - data.changeCount} 次）`}
             </button>
           </div>
+          {(data.pools?.length ?? 0) > 1 && (
+            <button
+              onClick={handleSwitchProvider}
+              disabled={isBusy}
+              className="w-full py-2 rounded-xl border border-gray-200 text-gray-400 text-xs font-medium hover:border-orange-200 hover:text-orange-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {isSwitching ? '切换中...' : '换一个运营商试试'}
+            </button>
+          )}
         </div>
       )}
 
-      {/* 超时：重新取号 */}
+      {/* 超时：重新取号 & 切换运营商 */}
       {phase === 'timeout' && (
-        <button
-          onClick={() => onPhaseChange('confirm')}
-          className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium transition-colors"
-        >
-          重新取号
-        </button>
+        <div className="space-y-2">
+          <button
+            onClick={() => onPhaseChange('confirm')}
+            className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium transition-colors"
+          >
+            重新取号
+          </button>
+          {(data.pools?.length ?? 0) > 1 && (
+            <button
+              onClick={handleSwitchProvider}
+              disabled={isSwitching}
+              className="w-full py-2 rounded-xl border border-gray-200 text-gray-400 text-xs font-medium hover:border-orange-200 hover:text-orange-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {isSwitching ? '切换中...' : '换一个运营商试试'}
+            </button>
+          )}
+        </div>
       )}
 
       {/* 完成：再次取号 */}

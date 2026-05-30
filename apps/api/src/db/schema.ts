@@ -61,6 +61,8 @@ export const orders = sqliteTable('orders', {
   changeCount: integer('change_count').notNull().default(0),
   cancelledReason: text('cancelled_reason'),
   orderedAt: text('ordered_at'),
+  // Step 7: 切换运营商链路追踪
+  fromOrderId: text('from_order_id'),
 })
 
 export const poolStatusCache = sqliteTable('pool_status_cache', {

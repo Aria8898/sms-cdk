@@ -275,7 +275,7 @@ app.post('/validate', async (c) => {
 // ─── POST /api/cdk/order ─────────────────────────────────────────────────────
 
 app.post('/order', async (c) => {
-  const body = await c.req.json<{ cdkId: string; serviceId?: string }>()
+  const body = await c.req.json<{ cdkId: string; serviceId?: string; fromOrderId?: string }>()
   const db = getDb(c.env.DB)
 
   const [cdkRow] = await db
@@ -427,6 +427,7 @@ app.post('/order', async (c) => {
     serviceId: serviceRow.id,
     status: 'pending',
     createdAt: now,
+    fromOrderId: body.fromOrderId ?? null,
   })
 
   try {
@@ -699,6 +700,10 @@ app.post('/order/:orderId/cancel', async (c) => {
   const orderId = c.req.param('orderId')
   const db = getDb(c.env.DB)
 
+  // 可选的取消原因：user_cancelled（主动取消）/ user_switched_pool（切换运营商）
+  const body = await c.req.json<{ reason?: string }>().catch(() => ({ reason: undefined }))
+  const cancelledReason = body.reason ?? 'user_cancelled'
+
   const [order] = await db.select().from(orders).where(eq(orders.id, orderId))
   if (!order) {
     return c.json({ error: '订单不存在' }, 404)
@@ -726,12 +731,19 @@ app.post('/order/:orderId/cancel', async (c) => {
 
   try {
     const adapter = getProvider(providerSlug, getApiKey(providerSlug, c.env))
-    await adapter.cancelOrder(order.externalOrderId)
+    // 切换运营商时尽力取消（忽略失败），普通取消失败则报错
+    if (cancelledReason === 'user_switched_pool') {
+      await adapter.cancelOrder(order.externalOrderId).catch((err: unknown) =>
+        console.warn(`[cancel] cancelOrder failed for order ${orderId} (switch):`, err),
+      )
+    } else {
+      await adapter.cancelOrder(order.externalOrderId)
+    }
 
     const now = new Date().toISOString()
     await db
       .update(orders)
-      .set({ status: 'cancelled', completedAt: now, cancelledReason: 'user_cancel' })
+      .set({ status: 'cancelled', completedAt: now, cancelledReason })
       .where(eq(orders.id, orderId))
 
     return c.json({ success: true })

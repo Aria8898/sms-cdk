@@ -67,6 +67,34 @@ function ResultBadge({ status }: { status: string }) {
   )
 }
 
+const CANCELLED_REASON_TEXT: Record<string, string> = {
+  timeout: '超时未收到短信',
+  user_switched_pool: '用户切换运营商',
+  user_cancelled: '用户主动取消',
+  user_cancel: '用户主动取消',  // 兼容旧格式
+}
+
+/** 取消原因标签：仅在 cancelled / expired 状态下展示 */
+function CancelReasonTag({ status, reason }: { status: string; reason?: string | null }) {
+  let text: string | null = null
+  if (status === 'expired') {
+    text = '超时未收到短信'
+  } else if (status === 'cancelled' && reason) {
+    text = CANCELLED_REASON_TEXT[reason] ?? reason
+  }
+  if (!text) return null
+  const isSwitched = reason === 'user_switched_pool'
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ml-1.5 ${
+      isSwitched
+        ? 'bg-indigo-50 text-indigo-600'
+        : 'bg-gray-100 text-gray-500'
+    }`}>
+      {text}
+    </span>
+  )
+}
+
 /** 展示单条订单的 SMS 历史列表（多条时展开） */
 function SmsList({ smsList }: { smsList: OrderSms[] }) {
   if (!smsList || smsList.length === 0) return null
@@ -196,7 +224,7 @@ export default function CdkDetail() {
               <th className="text-left px-5 py-3 font-medium text-gray-600">号码</th>
               <th className="text-left px-5 py-3 font-medium text-gray-600">短信内容</th>
               <th className="text-left px-5 py-3 font-medium text-gray-600">验证码</th>
-              <th className="text-left px-5 py-3 font-medium text-gray-600">结果</th>
+              <th className="text-left px-5 py-3 font-medium text-gray-600">结果 / 原因</th>
               <th className="text-left px-5 py-3 font-medium text-gray-600">完成时间</th>
             </tr>
           </thead>
@@ -208,10 +236,25 @@ export default function CdkDetail() {
                 </td>
               </tr>
             ) : (
-              orders.map((order: Order) => (
+              orders.map((order: Order, idx: number) => (
                 <>
                   <tr key={order.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                    <td className="px-5 py-3 text-gray-600 whitespace-nowrap">{order.createdAt}</td>
+                    <td className="px-5 py-3 text-gray-600 whitespace-nowrap">
+                      <div className="flex items-center gap-1.5">
+                        {/* 切换链路：若该订单来自上一个已取消订单，展示箭头标记 */}
+                        {order.fromOrderId && (
+                          <span
+                            className="text-indigo-400 text-xs font-medium"
+                            title={`续自订单 #${order.fromOrderId.substring(0, 8)}`}
+                          >
+                            ↪
+                          </span>
+                        )}
+                        <span>#{idx + 1}</span>
+                        <span className="text-gray-300 mx-0.5">·</span>
+                        <span>{order.createdAt}</span>
+                      </div>
+                    </td>
                     <td className="px-5 py-3 text-gray-600 font-mono whitespace-nowrap">
                       {order.phoneNumber ?? <span className="text-gray-300">—</span>}
                     </td>
@@ -228,7 +271,10 @@ export default function CdkDetail() {
                       {order.verificationCode ?? <span className="text-gray-300">—</span>}
                     </td>
                     <td className="px-5 py-3">
-                      <ResultBadge status={order.status} />
+                      <div className="flex items-center flex-wrap gap-0.5">
+                        <ResultBadge status={order.status} />
+                        <CancelReasonTag status={order.status} reason={order.cancelledReason} />
+                      </div>
                     </td>
                     <td className="px-5 py-3 text-gray-600 whitespace-nowrap">
                       {order.completedAt ?? <span className="text-gray-300">—</span>}

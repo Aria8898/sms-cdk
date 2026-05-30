@@ -64,6 +64,8 @@ export interface OrderSms {
 export interface Order {
   id: string; cdkId: string; phoneNumber: string | null; smsContent: string | null
   verificationCode: string | null; status: string; createdAt: string; completedAt: string | null
+  cancelledReason?: string | null
+  fromOrderId?: string | null
   smsList?: OrderSms[]
 }
 export interface CdkDetail extends Cdk {

@@ -84,7 +84,7 @@ function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-async function mockCreateOrder(_cdkId: string, _serviceId?: string): Promise<OrderResult> {
+async function mockCreateOrder(_cdkId: string, _serviceId?: string, _fromOrderId?: string): Promise<OrderResult> {
   if (mockConfig.scenario === 'create_fail') {
     await sleep(800)
     throw new Error('取号失败（Mock）')
@@ -154,7 +154,7 @@ async function mockFinishOrder(_orderId: string): Promise<{ success: boolean }> 
   return { success: true }
 }
 
-async function mockCancelOrder(_orderId: string): Promise<{ success: boolean }> {
+async function mockCancelOrder(_orderId: string, _reason?: string): Promise<{ success: boolean }> {
   if (mockConfig.scenario === 'cancel_fail') {
     await sleep(500)
     throw new Error('取消失败（Mock）')
@@ -202,10 +202,14 @@ export const cdkApi = {
     }),
 
   createOrder: withMock(
-    (cdkId: string, serviceId?: string) =>
+    (cdkId: string, serviceId?: string, fromOrderId?: string) =>
       request<OrderResult>('/api/cdk/order', {
         method: 'POST',
-        body: JSON.stringify({ cdkId, ...(serviceId ? { serviceId } : {}) }),
+        body: JSON.stringify({
+          cdkId,
+          ...(serviceId ? { serviceId } : {}),
+          ...(fromOrderId ? { fromOrderId } : {}),
+        }),
       }),
     mockCreateOrder,
   ),
@@ -228,8 +232,11 @@ export const cdkApi = {
   ),
 
   cancelOrder: withMock(
-    (orderId: string) =>
-      request<{ success: boolean }>(`/api/cdk/order/${orderId}/cancel`, { method: 'POST' }),
+    (orderId: string, reason?: string) =>
+      request<{ success: boolean }>(`/api/cdk/order/${orderId}/cancel`, {
+        method: 'POST',
+        body: JSON.stringify(reason ? { reason } : {}),
+      }),
     mockCancelOrder,
   ),
 
