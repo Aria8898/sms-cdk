@@ -21,7 +21,8 @@
       "Bash(pnpm --filter web exec tsc --noEmit)",
       "Bash(pnpm --filter admin exec tsc --noEmit)",
       "Bash(pnpm --filter api tsc --noEmit)",
-      "Bash(pnpm --filter web tsc --noEmit)"
+      "Bash(pnpm --filter web tsc --noEmit)",
+      "Bash(find *)"
     ]
   }
 }
