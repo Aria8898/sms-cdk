@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   providersApi, servicesApi, poolApi,
   type Provider, type Service, type ServiceCategory,
@@ -439,6 +439,25 @@ export default function PoolMonitor() {
   const [isLoading, setIsLoading] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [error, setError] = useState('')
+  const [showBackTop, setShowBackTop] = useState(false)
+
+  useEffect(() => {
+    let ticking = false
+    const onScroll = () => {
+      if (ticking) return
+      ticking = true
+      requestAnimationFrame(() => {
+        setShowBackTop(window.scrollY > 400)
+        ticking = false
+      })
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
+
+  const scrollToTop = useCallback(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [])
 
   useEffect(() => {
     async function init() {
@@ -601,6 +620,18 @@ export default function PoolMonitor() {
         <div className="py-16 text-center text-gray-400 text-sm">
           选择 Provider 和 Service 后点击「查询」
         </div>
+      )}
+
+      {showBackTop && (
+        <button
+          onClick={scrollToTop}
+          className="fixed bottom-8 right-8 w-10 h-10 flex items-center justify-center rounded-full bg-white border border-gray-200 shadow-md text-gray-500 hover:text-gray-800 hover:shadow-lg transition-all z-50"
+          aria-label="回到顶部"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="18 15 12 9 6 15" />
+          </svg>
+        </button>
       )}
     </div>
   )
