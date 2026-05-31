@@ -4,6 +4,8 @@ import { cdksApi, type Cdk } from '../lib/api'
 
 type Tab = 'all' | 'active' | 'pending' | 'exhausted' | 'disabled'
 
+const PAGE_SIZE = 50
+
 function StatusBadge({ status }: { status: string }) {
   if (status === 'active') {
     return (
@@ -50,15 +52,19 @@ export default function CdkList() {
   const navigate = useNavigate()
   const [tab, setTab] = useState<Tab>('all')
   const [cdks, setCdks] = useState<Cdk[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
 
-  async function loadCdks() {
+  async function loadCdks(currentTab: Tab, currentPage: number) {
     setIsLoading(true)
     setError('')
     try {
-      const data = await cdksApi.list()
-      setCdks(data)
+      const status = currentTab === 'all' ? undefined : currentTab
+      const res = await cdksApi.list({ status, page: currentPage, pageSize: PAGE_SIZE })
+      setCdks(res.data)
+      setTotal(res.total)
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载失败')
     } finally {
@@ -67,16 +73,16 @@ export default function CdkList() {
   }
 
   useEffect(() => {
-    loadCdks()
-  }, [])
+    loadCdks(tab, page)
+  }, [tab, page])
 
-  const filtered = cdks.filter(c => {
-    if (tab === 'active') return c.status === 'active'
-    if (tab === 'pending') return c.hasPendingOrder === true
-    if (tab === 'exhausted') return c.status === 'exhausted'
-    if (tab === 'disabled') return c.status === 'disabled'
-    return true
-  })
+  function handleTabChange(newTab: Tab) {
+    setTab(newTab)
+    setPage(1)
+  }
+
+  const filtered = cdks
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'all',       label: '全部' },
@@ -89,8 +95,8 @@ export default function CdkList() {
   async function handleDisable(id: string) {
     if (!window.confirm('确认停用该 CDK？停用后用户将无法使用。')) return
     try {
-      const updated = await cdksApi.disable(id)
-      setCdks(prev => prev.map(c => c.id === id ? updated : c))
+      await cdksApi.disable(id)
+      loadCdks(tab, page)
     } catch (err) {
       alert(err instanceof Error ? err.message : '操作失败')
     }
@@ -98,8 +104,8 @@ export default function CdkList() {
 
   async function handleEnable(id: string) {
     try {
-      const updated = await cdksApi.enable(id)
-      setCdks(prev => prev.map(c => c.id === id ? updated : c))
+      await cdksApi.enable(id)
+      loadCdks(tab, page)
     } catch (err) {
       alert(err instanceof Error ? err.message : '操作失败')
     }
@@ -109,7 +115,7 @@ export default function CdkList() {
     if (!window.confirm('确认删除？此操作不可恢复。')) return
     try {
       await cdksApi.delete(id)
-      setCdks(prev => prev.filter(c => c.id !== id))
+      loadCdks(tab, page)
     } catch (err) {
       alert(err instanceof Error ? err.message : '操作失败')
     }
@@ -131,7 +137,7 @@ export default function CdkList() {
         {tabs.map(t => (
           <button
             key={t.key}
-            onClick={() => setTab(t.key)}
+            onClick={() => handleTabChange(t.key)}
             className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
               tab === t.key
                 ? 'border-blue-600 text-blue-600'
@@ -148,6 +154,7 @@ export default function CdkList() {
       ) : error ? (
         <div className="py-12 text-center text-red-500 text-sm">{error}</div>
       ) : (
+        <>
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <table className="w-full text-sm">
             <thead>
@@ -274,6 +281,29 @@ export default function CdkList() {
             </tbody>
           </table>
         </div>
+
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between mt-3 text-sm text-gray-500">
+            <span>共 {total} 条，第 {page} / {totalPages} 页</span>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="px-3 py-1 rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                上一页
+              </button>
+              <button
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                className="px-3 py-1 rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                下一页
+              </button>
+            </div>
+          </div>
+        )}
+        </>
       )}
     </div>
   )

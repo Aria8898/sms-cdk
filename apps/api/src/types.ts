@@ -10,3 +10,7 @@ export type Bindings = {
   /** 预留：登录异常通知 Webhook，留空则不通知 */
   NOTIFY_WEBHOOK_URL?: string
 }
+
+export type Variables = {
+  requestId: string
+}

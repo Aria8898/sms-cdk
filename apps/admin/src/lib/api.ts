@@ -205,9 +205,17 @@ export const securityApi = {
 }
 
 // ---- CDKs ----
+export type CdkListResponse = { data: Cdk[]; total: number; page: number; pageSize: number }
+
 export const cdksApi = {
-  list: (status?: string) =>
-    request<Cdk[]>(`/api/cdks${status ? `?status=${status}` : ''}`),
+  list: (params?: { status?: string; page?: number; pageSize?: number }) => {
+    const qs = new URLSearchParams()
+    if (params?.status) qs.set('status', params.status)
+    if (params?.page) qs.set('page', String(params.page))
+    if (params?.pageSize) qs.set('pageSize', String(params.pageSize))
+    const query = qs.toString()
+    return request<CdkListResponse>(`/api/cdks${query ? `?${query}` : ''}`)
+  },
   generate: (data: {
     categoryId: string
     usesPerCdk: number

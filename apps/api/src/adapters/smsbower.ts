@@ -1,4 +1,5 @@
 import type { SmsProvider, OrderOptions, OrderResult, PollResult, PoolCountryStatus } from './types'
+import { ISO_TO_BOWER_KEY, ISO_TO_ENG_NAME, BOWER_KEY_TO_ISO, isoToSmsBowerKey } from '../config/countries'
 
 // ─── SMSBower API ─────────────────────────────────────────────────────────────
 // 官方 API: https://smsbower.page/stubs/handler_api.php
@@ -77,24 +78,8 @@ function parseActivationTime(_value: string | number | undefined): number {
   return 1200  // 20 分钟
 }
 
-/** ISO 2 字母码 → SMSBower 国家 key（小写），用于内部 API 过滤 */
-const ISO_TO_BOWER_KEY: Record<string, string> = {
-  US: 'usa', RU: 'russia', CN: 'china', GB: 'england',
-  DE: 'germany', FR: 'france', IN: 'india', BR: 'brazil',
-  JP: 'japan', KR: 'south korea', VN: 'vietnam', ID: 'indonesia',
-  PH: 'philippines', NG: 'nigeria', KE: 'kenya',
-  SG: 'singapore', MY: 'malaysia', CA: 'canada', AU: 'australia',
-  MX: 'mexico',
-}
-
-/** V3 降级时 bower key（如 'usa'）→ ISO 码（如 'US'），用于 blockedCountries 匹配 */
-const BOWER_KEY_TO_ISO: Record<string, string> = Object.fromEntries(
-  Object.entries(ISO_TO_BOWER_KEY).map(([iso, key]) => [key, iso]),
-)
-
-function isoToSmsBowerKey(iso: string): string | null {
-  return ISO_TO_BOWER_KEY[iso.toUpperCase()] ?? null
-}
+// 国家映射已提取到 src/config/countries.ts，统一维护
+// ISO_TO_BOWER_KEY / BOWER_KEY_TO_ISO / isoToSmsBowerKey 从配置文件导入
 
 // ─── Official country list cache ──────────────────────────────────────────────
 
@@ -118,41 +103,39 @@ export class SmsBowerAdapter implements SmsProvider {
    */
   private async _getOfficialCountryId(iso: string, titleFallback?: string): Promise<number | undefined> {
     if (!this._officialCountryCache) {
+      // getCountries 失败时明确报错，不静默降级（避免分配错误国家号码）
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 8000)
+      let text: string
       try {
-        const res = await fetch(`${OFFICIAL_BASE}?api_key=${encodeURIComponent(this.apiKey)}&action=getCountries`)
-        const text = await res.text()
+        const res = await fetch(
+          `${OFFICIAL_BASE}?api_key=${encodeURIComponent(this.apiKey)}&action=getCountries`,
+          { signal: ctrl.signal },
+        )
+        text = await res.text()
         console.log(`[smsbower] getCountries status=${res.status} body(前300)=${text.slice(0, 300)}`)
-        const parsed = JSON.parse(text) as unknown
-        // 可能是数组，也可能是对象（{ id: { eng, rus, chn } } 格式）
-        this._officialCountryCache = new Map()
-        if (Array.isArray(parsed)) {
-          for (const c of parsed as OfficialCountry[]) {
-            if (c.eng) this._officialCountryCache.set(c.eng.toLowerCase(), c.id)
-          }
-        } else if (parsed && typeof parsed === 'object') {
-          // 对象格式：{ "1": { "eng": "Russia", ... }, "2": { ... } }
-          for (const [id, val] of Object.entries(parsed as Record<string, { eng?: string }>)) {
-            if (val?.eng) this._officialCountryCache.set(val.eng.toLowerCase(), Number(id))
-          }
-        }
-        console.log(`[smsbower] getCountries 缓存了 ${this._officialCountryCache.size} 个国家`)
-      } catch (err) {
-        console.warn('[smsbower] getCountries 失败，country 参数将不传:', err)
-        this._officialCountryCache = new Map()  // 空缓存，避免反复请求
+        if (!res.ok) throw new Error(`getCountries HTTP ${res.status}: ${text.slice(0, 80)}`)
+      } finally {
+        clearTimeout(timer)
       }
+      const parsed = JSON.parse(text) as unknown
+      // 可能是数组，也可能是对象（{ id: { eng, rus, chn } } 格式）
+      this._officialCountryCache = new Map()
+      if (Array.isArray(parsed)) {
+        for (const c of parsed as OfficialCountry[]) {
+          if (c.eng) this._officialCountryCache.set(c.eng.toLowerCase(), c.id)
+        }
+      } else if (parsed && typeof parsed === 'object') {
+        // 对象格式：{ "1": { "eng": "Russia", ... }, "2": { ... } }
+        for (const [id, val] of Object.entries(parsed as Record<string, { eng?: string }>)) {
+          if (val?.eng) this._officialCountryCache.set(val.eng.toLowerCase(), Number(id))
+        }
+      }
+      console.log(`[smsbower] getCountries 缓存了 ${this._officialCountryCache.size} 个国家`)
     }
 
-    // 优先用 ISO 精确匹配（getCountries 通常不含 ISO 字段，用英文名匹配）
-    const isoToEngName: Record<string, string> = {
-      US: 'united states', RU: 'russia', CN: 'china', GB: 'england',
-      DE: 'germany', FR: 'france', IN: 'india', BR: 'brazil',
-      JP: 'japan', KR: 'south korea', VN: 'vietnam', ID: 'indonesia',
-      PH: 'philippines', NG: 'nigeria', KE: 'kenya',
-      SG: 'singapore', MY: 'malaysia', CA: 'canada', AU: 'australia',
-      MX: 'mexico', UA: 'ukraine', PL: 'poland', TR: 'turkey',
-      TH: 'thailand', PK: 'pakistan', BD: 'bangladesh', EG: 'egypt',
-    }
-    const engName = isoToEngName[iso.toUpperCase()]
+    // 优先用 ISO 精确匹配（从配置文件 ISO_TO_ENG_NAME 查英文名）
+    const engName = ISO_TO_ENG_NAME[iso.toUpperCase()]
     if (engName) {
       const id = this._officialCountryCache.get(engName)
       if (id !== undefined) return id
@@ -493,17 +476,20 @@ export class SmsBowerAdapter implements SmsProvider {
   // ─── cancelOrder ────────────────────────────────────────────────────────────
 
   async cancelOrder(externalOrderId: string): Promise<void> {
+    const params = new URLSearchParams({
+      api_key: this.apiKey,
+      action: 'setStatus',
+      id: externalOrderId,
+      status: '8',
+    })
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 10000)
     try {
-      const params = new URLSearchParams({
-        api_key: this.apiKey,
-        action: 'setStatus',
-        id: externalOrderId,
-        status: '8',
-      })
-      await fetch(`${OFFICIAL_BASE}?${params.toString()}`)
-    } catch {
-      // 尽力取消，忽略错误
+      await fetch(`${OFFICIAL_BASE}?${params.toString()}`, { signal: ctrl.signal })
+    } finally {
+      clearTimeout(timer)
     }
+    // 不再静默忽略错误，由调用方决定如何处理（写 audit_log 或记录警告）
   }
 
   // ─── retryOrder（请求再发一条短信，对应 status=3）──────────────────────────

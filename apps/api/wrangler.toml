@@ -10,3 +10,7 @@ database_id = "local-placeholder"
 
 [vars]
 ADMIN_USERNAME = "admin"
+
+[triggers]
+crons = ["*/10 * * * *"]
+

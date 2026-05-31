@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { eq, sql, and } from 'drizzle-orm'
+import { eq, sql, and, inArray } from 'drizzle-orm'
 import { getDb, cdks, services, serviceCategories, orders, orderSms } from '../db'
 import { authMiddleware } from '../middleware/auth'
 import type { Bindings } from '../types'
@@ -35,8 +35,24 @@ function generateCdkCode(shortName: string, countryCode?: string): string {
 app.get('/', async (c) => {
   const db = getDb(c.env.DB)
   const statusFilter = c.req.query('status')
+  const page = Math.max(1, parseInt(c.req.query('page') ?? '1', 10))
+  const pageSize = Math.min(200, Math.max(1, parseInt(c.req.query('pageSize') ?? '50', 10)))
+  const offset = (page - 1) * pageSize
 
-  const rows = await db
+  // 构建 WHERE 条件
+  const conditions = statusFilter && statusFilter !== 'pending'
+    ? and(eq(cdks.status, statusFilter))
+    : undefined
+
+  // 查总数
+  const [countRow] = await db
+    .select({ total: sql<number>`count(*)`.as('total') })
+    .from(cdks)
+    .where(conditions)
+
+  const total = countRow?.total ?? 0
+
+  let query = db
     .select({
       id: cdks.id,
       code: cdks.code,
@@ -58,22 +74,58 @@ app.get('/', async (c) => {
     })
     .from(cdks)
     .leftJoin(services, eq(services.id, cdks.serviceId))
-    .leftJoin(serviceCategories, eq(serviceCategories.id, services.categoryId))
+    .leftJoin(serviceCategories, eq(serviceCategories.id, cdks.categoryId))
 
-  const result = rows.map((row) => ({
-    ...row,
-    hasPendingOrder: row.hasPendingOrder === 1,
-  }))
-
+  // 特殊情况：pending 过滤需在结果中判断 hasPendingOrder，但用 SQL EXISTS 已嵌入
   if (statusFilter === 'pending') {
-    return c.json(result.filter((r) => r.hasPendingOrder))
+    // 用 SQL WHERE EXISTS 过滤有进行中订单的 CDK
+    const pendingRows = await db
+      .select({
+        id: cdks.id,
+        code: cdks.code,
+        serviceId: cdks.serviceId,
+        categoryId: cdks.categoryId,
+        countryCode: cdks.countryCode,
+        totalUses: cdks.totalUses,
+        remainingUses: cdks.remainingUses,
+        status: cdks.status,
+        createdAt: cdks.createdAt,
+        cdkType: cdks.cdkType,
+        validityMinutes: cdks.validityMinutes,
+        serviceName: sql<string>`COALESCE(${serviceCategories.name}, ${services.name})`.as('service_name'),
+        hasPendingOrder: sql<number>`1`.as('has_pending_order'),
+      })
+      .from(cdks)
+      .leftJoin(services, eq(services.id, cdks.serviceId))
+      .leftJoin(serviceCategories, eq(serviceCategories.id, cdks.categoryId))
+      .where(sql`EXISTS (SELECT 1 FROM orders WHERE orders.cdk_id = ${cdks.id} AND orders.status = 'pending')`)
+      .limit(pageSize)
+      .offset(offset)
+
+    const [pendingCount] = await db
+      .select({ total: sql<number>`count(*)`.as('total') })
+      .from(cdks)
+      .where(sql`EXISTS (SELECT 1 FROM orders WHERE orders.cdk_id = ${cdks.id} AND orders.status = 'pending')`)
+
+    return c.json({
+      data: pendingRows.map(r => ({ ...r, hasPendingOrder: true })),
+      total: pendingCount?.total ?? 0,
+      page,
+      pageSize,
+    })
   }
 
-  if (statusFilter) {
-    return c.json(result.filter((r) => r.status === statusFilter))
-  }
+  const rows = await (conditions ? query.where(conditions) : query)
+    .orderBy(sql`${cdks.createdAt} DESC`)
+    .limit(pageSize)
+    .offset(offset)
 
-  return c.json(result)
+  return c.json({
+    data: rows.map(r => ({ ...r, hasPendingOrder: r.hasPendingOrder === 1 })),
+    total,
+    page,
+    pageSize,
+  })
 })
 
 app.post('/generate', async (c) => {
@@ -120,7 +172,10 @@ app.post('/generate', async (c) => {
   const serviceId = fallbackService.id
   const countryCode = body.countryCode?.trim().toUpperCase() || undefined
   const cdkType = body.cdkType ?? 'count'
-  const validityMinutes = cdkType === 'timed' ? (body.validityMinutes ?? 60) : null
+  // 后端强制范围校验：1–10080 分钟（最短 1 分钟，最长 7 天）
+  const validityMinutes = cdkType === 'timed'
+    ? Math.min(10080, Math.max(1, body.validityMinutes ?? 60))
+    : null
   // 时效型 CDK usesPerCdk 无实际意义，统一存 1
   const usesPerCdk = cdkType === 'timed' ? 1 : Math.max(1, body.usesPerCdk ?? 1)
 
@@ -207,6 +262,36 @@ app.patch('/:id/enable', async (c) => {
   const [updated] = await db.select().from(cdks).where(eq(cdks.id, id))
 
   return c.json(updated)
+})
+
+// POST /api/cdks/batch-disable — 批量作废
+app.post('/batch-disable', async (c) => {
+  const body = await c.req.json<{ ids: string[] }>()
+  if (!Array.isArray(body.ids) || body.ids.length === 0) {
+    return c.json({ error: '请提供要作废的 CDK ID 列表' }, 400)
+  }
+  if (body.ids.length > 200) {
+    return c.json({ error: '单次最多批量作废 200 个 CDK' }, 400)
+  }
+
+  const db = getDb(c.env.DB)
+
+  // 检查有无进行中订单
+  const [pendingRow] = await db
+    .select({ count: sql<number>`count(*)`.as('count') })
+    .from(orders)
+    .where(and(inArray(orders.cdkId, body.ids), eq(orders.status, 'pending')))
+
+  if (pendingRow.count > 0) {
+    return c.json({ error: `有 ${pendingRow.count} 个 CDK 存在进行中的订单，无法批量作废` }, 400)
+  }
+
+  await db
+    .update(cdks)
+    .set({ status: 'disabled' })
+    .where(and(inArray(cdks.id, body.ids), eq(cdks.status, 'active')))
+
+  return c.json({ success: true, disabled: body.ids.length })
 })
 
 app.delete('/:id', async (c) => {

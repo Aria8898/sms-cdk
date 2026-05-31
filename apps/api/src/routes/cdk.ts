@@ -9,12 +9,15 @@ import {
   serviceCategories,
   poolStatusCache,
   orderSms,
+  rateLimits,
+  auditLogs,
 } from '../db'
 import { getProvider, getApiKey } from '../adapters'
 import type { PoolCountryStatus } from '../adapters/types'
-import type { Bindings } from '../types'
+import type { Bindings, Variables } from '../types'
+import { log, writeAuditLog } from '../lib/logger'
 
-const app = new Hono<{ Bindings: Bindings }>()
+const app = new Hono<{ Bindings: Bindings; Variables: Variables }>()
 
 // ─── Pool 状态缓存 ────────────────────────────────────────────────────────────
 
@@ -220,38 +223,56 @@ async function expireOrder(
     .where(eq(orders.id, orderId))
 }
 
-// ─── 内存限频（per-isolate，最佳努力）────────────────────────────────────────
+// ─── D1 持久化限流（固定窗口，原子 UPSERT，多节点安全）────────────────────────
 
-const _validateRateMap = new Map<string, number[]>()
-
-function checkValidateRateLimit(ip: string, max: number): boolean {
-  const now = Date.now()
-  const window = now - 60_000
-  const times = (_validateRateMap.get(ip) ?? []).filter(t => t > window)
-  if (times.length >= max) return false
-  times.push(now)
-  _validateRateMap.set(ip, times)
-  // 简单清理：超过 1 万条目时清理过期记录
-  if (_validateRateMap.size > 10_000) {
-    for (const [k, v] of _validateRateMap) {
-      if (v.every(t => t <= window)) _validateRateMap.delete(k)
-    }
-  }
-  return true
+/**
+ * 使用 D1 原子 UPSERT 实现固定窗口限流。
+ * 每个 IP 仅一行，无存储增长，不需要 Cron 清理。
+ * 存在边界突发（最多 2× 限制量），对 CDK 枚举防护可接受。
+ * @returns true 表示允许请求，false 表示超出限制
+ */
+async function checkValidateRateLimit(
+  db: ReturnType<typeof getDb>,
+  ip: string,
+  max: number,
+): Promise<boolean> {
+  const key = `validate:${ip}`
+  await db.run(sql`
+    INSERT INTO rate_limits (key, count, window_start)
+    VALUES (${key}, 1, datetime('now'))
+    ON CONFLICT(key) DO UPDATE SET
+      count = CASE
+        WHEN window_start > datetime('now', '-60 seconds') THEN count + 1
+        ELSE 1
+      END,
+      window_start = CASE
+        WHEN window_start > datetime('now', '-60 seconds') THEN window_start
+        ELSE datetime('now')
+      END
+  `)
+  const [row] = await db
+    .select({ count: rateLimits.count })
+    .from(rateLimits)
+    .where(eq(rateLimits.key, key))
+  return (row?.count ?? 1) <= max
 }
 
 // ─── POST /api/cdk/validate ───────────────────────────────────────────────────
 
 app.post('/validate', async (c) => {
-  // IP 限频
+  const requestId = c.get('requestId')
+  // IP 限频（D1 持久化，多节点安全）
   const ip = c.req.header('CF-Connecting-IP') ?? c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ?? 'unknown'
   const rateMax = parseInt(c.env.RATE_LIMIT_VALIDATE ?? '10', 10)
-  if (!checkValidateRateLimit(ip, rateMax)) {
+  const db = getDb(c.env.DB)
+
+  const allowed = await checkValidateRateLimit(db, ip, rateMax)
+  if (!allowed) {
+    log('validate.rate_limited', { requestId, ip })
     return c.json({ error: '请求过于频繁，请稍后重试' }, 429)
   }
 
   const body = await c.req.json<{ code: string }>()
-  const db = getDb(c.env.DB)
 
   const [row] = await db
     .select({
@@ -271,12 +292,13 @@ app.post('/validate', async (c) => {
     .leftJoin(serviceCategories, eq(serviceCategories.id, cdks.categoryId))
     .where(eq(cdks.code, body.code))
 
+  // 统一错误信息：不区分"不存在"和"已失效"，防止枚举攻击
   if (!row) {
     return c.json({ error: 'CDK 不存在或已失效' }, 404)
   }
 
   if (row.status === 'disabled') {
-    return c.json({ error: 'CDK 已停用' }, 400)
+    return c.json({ error: 'CDK 不存在或已失效' }, 404)
   }
 
   // 时效型 CDK 已耗尽：返回过期信息
@@ -340,6 +362,7 @@ app.post('/validate', async (c) => {
     const [activeOrder] = await db.select().from(orders).where(eq(orders.id, activeOrderId))
 
     if (!activeOrder) {
+      void writeAuditLog(db, 'cdk.validated', 'cdk', row.id, { requestId, ip })
       return c.json(baseResponse)
     }
 
@@ -363,6 +386,7 @@ app.post('/validate', async (c) => {
         ? !!activeOrder.expiresAt && activeOrder.expiresAt > now
         : row.remainingUses > 0
 
+    void writeAuditLog(db, 'cdk.validated', 'cdk', row.id, { requestId, ip, resumedOrderId: activeOrderId })
     return c.json({
       ...baseResponse,
       activeOrder: {
@@ -379,12 +403,14 @@ app.post('/validate', async (c) => {
     })
   }
 
+  void writeAuditLog(db, 'cdk.validated', 'cdk', row.id, { requestId, ip })
   return c.json(baseResponse)
 })
 
 // ─── POST /api/cdk/order ─────────────────────────────────────────────────────
 
 app.post('/order', async (c) => {
+  const requestId = c.get('requestId')
   const body = await c.req.json<{ cdkId: string; serviceId?: string; fromOrderId?: string }>()
   const db = getDb(c.env.DB)
 
@@ -564,6 +590,9 @@ app.post('/order', async (c) => {
       .set({ externalOrderId: result.orderId, phoneNumber: result.phoneNumber, expiresAt, orderedAt: now })
       .where(eq(orders.id, orderId))
 
+    log('order.created', { requestId, orderId, cdkId: body.cdkId, serviceId: serviceRow.id, ip })
+    void writeAuditLog(db, 'order.created', 'order', orderId, { requestId, cdkId: body.cdkId, serviceId: serviceRow.id, ip })
+
     return c.json({ orderId, phoneNumber: result.phoneNumber, expiresIn: result.expiresIn, expiresAt, changeCount: 0, orderedAt: now })
   } catch (err) {
     const message = err instanceof Error ? err.message : '获取号码失败，请稍后重试'
@@ -579,6 +608,7 @@ app.post('/order', async (c) => {
 // ─── GET /api/cdk/order/:orderId/status ──────────────────────────────────────
 
 app.get('/order/:orderId/status', async (c) => {
+  const requestId = c.get('requestId')
   const orderId = c.req.param('orderId')
   const db = getDb(c.env.DB)
 
@@ -715,10 +745,14 @@ app.get('/order/:orderId/status', async (c) => {
             .update(cdks)
             .set({ remainingUses: newRemaining, status: newRemaining === 0 ? 'exhausted' : cdk.status })
             .where(eq(cdks.id, order.cdkId))
+          if (newRemaining === 0) {
+            void writeAuditLog(db, 'cdk.exhausted', 'cdk', order.cdkId, { requestId, orderId, trigger: 'received' })
+          }
         }
         canRetry = newRemaining > 0
       }
 
+      void writeAuditLog(db, 'order.status_changed', 'order', orderId, { requestId, from: 'pending', to: 'received' })
       return c.json({
         status: 'received',
         smsContent: pollResult.smsContent,
@@ -746,8 +780,12 @@ app.get('/order/:orderId/status', async (c) => {
           .update(cdks)
           .set({ remainingUses: newRemaining, status: newRemaining === 0 ? 'exhausted' : cdk.status })
           .where(eq(cdks.id, order.cdkId))
+        if (newRemaining === 0) {
+          void writeAuditLog(db, 'cdk.exhausted', 'cdk', order.cdkId, { requestId, orderId, trigger: 'completed' })
+        }
       }
 
+      void writeAuditLog(db, 'order.status_changed', 'order', orderId, { requestId, from: 'pending', to: 'completed' })
       return c.json({
         status: 'completed',
         smsContent: pollResult.smsContent,
@@ -904,6 +942,7 @@ app.post('/order/:orderId/finish', async (c) => {
 // 取消取号：通知上游取消，订单状态变为 cancelled
 
 app.post('/order/:orderId/cancel', async (c) => {
+  const requestId = c.get('requestId')
   const orderId = c.req.param('orderId')
   const db = getDb(c.env.DB)
 
@@ -937,9 +976,11 @@ app.post('/order/:orderId/cancel', async (c) => {
   try {
     const adapter = getProvider(providerSlug, getApiKey(providerSlug, c.env))
     if (cancelledReason === 'user_switched_pool') {
-      await adapter.cancelOrder(order.externalOrderId).catch((err: unknown) =>
-        console.warn(`[cancel] cancelOrder failed for order ${orderId} (switch):`, err),
-      )
+      await adapter.cancelOrder(order.externalOrderId).catch((err: unknown) => {
+        const errMsg = err instanceof Error ? err.message : String(err)
+        console.warn(`[cancel] cancelOrder failed for order ${orderId} (switch):`, err)
+        void writeAuditLog(db, 'cancel.failed', 'order', orderId, { requestId, provider: providerSlug, error: errMsg, reason: cancelledReason })
+      })
     } else {
       await adapter.cancelOrder(order.externalOrderId)
     }
@@ -961,6 +1002,7 @@ app.post('/order/:orderId/cancel', async (c) => {
 // 换号：取消当前号码，重新取一个号（复用同一订单，changeCount+1）
 
 app.post('/order/:orderId/change', async (c) => {
+  const requestId = c.get('requestId')
   const orderId = c.req.param('orderId')
   const db = getDb(c.env.DB)
 
@@ -1012,7 +1054,11 @@ app.post('/order/:orderId/change', async (c) => {
   try {
     const adapter = getProvider(serviceRow.providerSlug, getApiKey(serviceRow.providerSlug, c.env))
 
-    await adapter.cancelOrder(order.externalOrderId)
+    await adapter.cancelOrder(order.externalOrderId).catch((err: unknown) => {
+      const errMsg = err instanceof Error ? err.message : String(err)
+      console.warn(`[change] cancelOrder failed for order ${orderId}:`, err)
+      void writeAuditLog(db, 'cancel.failed', 'order', orderId, { requestId, provider: serviceRow.providerSlug, error: errMsg, reason: 'change' })
+    })
 
     const result = await adapter.orderNumber(serviceRow.externalServiceId!, {
       maxPrice: serviceRow.maxPrice!,

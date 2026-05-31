@@ -108,6 +108,7 @@ app.get('/', async (c) => {
     let rawPositions: PoolCountryStatus[] = []
     // 缓存不存 dataSource，读缓存时默认 internal（需要精确信息可强制刷新）
     let dataSource: 'internal' | 'v3' = 'internal'
+    let cachedAt: string | null = null
 
     // ── 读缓存 ──────────────────────────────────────────────────────────────
     if (!forceRefresh) {
@@ -117,6 +118,7 @@ app.get('/', async (c) => {
         .where(eq(poolStatusCache.serviceId, serviceId))
       if (cached) {
         rawPositions = JSON.parse(cached.data) as PoolCountryStatus[]
+        cachedAt = cached.cachedAt
       }
     }
 
@@ -133,6 +135,7 @@ app.get('/', async (c) => {
       // 更新缓存
       try {
         const now = new Date().toISOString()
+        cachedAt = now
         await db
           .insert(poolStatusCache)
           .values({ serviceId, data: JSON.stringify(rawPositions), cachedAt: now })
@@ -179,6 +182,7 @@ app.get('/', async (c) => {
     return c.json({
       providerSlug: 'smsbower',
       dataSource,
+      cachedAt,
       service: {
         id: row.id,
         name: row.name,

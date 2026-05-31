@@ -94,3 +94,20 @@ export const orderSms = sqliteTable('order_sms', {
   verificationCode: text('verification_code').notNull().default(''),
   receivedAt: text('received_at').notNull(),
 })
+
+// 持久审计日志（Migration 0013）
+export const auditLogs = sqliteTable('audit_logs', {
+  id: text('id').primaryKey(),
+  event: text('event').notNull(),       // 'cdk.validated' | 'order.created' | 'order.status_changed' | 'cdk.exhausted' | 'cancel.failed'
+  entityType: text('entity_type').notNull(), // 'cdk' | 'order'
+  entityId: text('entity_id').notNull(),
+  meta: text('meta'),                   // JSON 字符串
+  createdAt: text('created_at').notNull(),
+})
+
+// D1 持久化限流（Migration 0014）
+export const rateLimits = sqliteTable('rate_limits', {
+  key: text('key').primaryKey(),        // 如 "validate:1.2.3.4"
+  count: integer('count').notNull().default(1),
+  windowStart: text('window_start').notNull(),
+})
