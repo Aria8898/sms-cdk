@@ -48,7 +48,7 @@ export class SmsPoolAdapter implements SmsProvider {
         console.log(`[smspool] success_rate status=${res.status}`)
         if (res.ok) {
           const data = await res.json()
-          console.log(`[smspool] success_rate data=`, JSON.stringify(data).slice(0, 200))
+          console.log(`[smspool] success_rate count=${Array.isArray(data) ? (data as unknown[]).length : 0}`)
           if (Array.isArray(data)) {
             candidates = data
           }
@@ -93,7 +93,7 @@ export class SmsPoolAdapter implements SmsProvider {
           if (!res.ok) throw new Error(`该 CDK 仅限 ${targetCode} 国家使用，但该国家暂无可用号码`)
 
           const data = await res.json() as PurchaseResponse
-          console.log(`[smspool] purchase/sms response=`, JSON.stringify(data))
+          console.log(`[smspool] purchase/sms success=${data.success}`)
           const orderId = data.order_id ?? data.orderid
           if (data.success === 1 && orderId) {
             const phoneNumber = (data.cc && data.phonenumber)
@@ -157,7 +157,7 @@ export class SmsPoolAdapter implements SmsProvider {
         if (!res.ok) continue
 
         const data = await res.json() as PurchaseResponse
-        console.log(`[smspool] purchase/sms response=`, JSON.stringify(data))
+        console.log(`[smspool] purchase/sms success=${data.success}`)
         const orderId = data.order_id ?? data.orderid
         if (data.success === 1 && orderId) {
           const phoneNumber = (data.cc && data.phonenumber)

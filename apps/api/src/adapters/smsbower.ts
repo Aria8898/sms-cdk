@@ -113,7 +113,7 @@ export class SmsBowerAdapter implements SmsProvider {
           { signal: ctrl.signal },
         )
         text = await res.text()
-        console.log(`[smsbower] getCountries status=${res.status} body(前300)=${text.slice(0, 300)}`)
+        console.log(`[smsbower] getCountries status=${res.status}`)
         if (!res.ok) throw new Error(`getCountries HTTP ${res.status}: ${text.slice(0, 80)}`)
       } finally {
         clearTimeout(timer)
@@ -172,7 +172,7 @@ export class SmsBowerAdapter implements SmsProvider {
         console.log(`[smsbower] getPricesByService status=${res.status}`)
         if (res.ok) {
           const text = await res.text()
-          console.log(`[smsbower] getPricesByService body(前1500)=${text.slice(0, 1500)}`)
+          console.log(`[smsbower] getPricesByService body length=${text.length}`)
           let data: unknown
           try { data = JSON.parse(text) } catch { data = null }
           if (data && typeof data === 'object' && !Array.isArray(data) && !(data as Record<string, unknown>).error) {
@@ -241,7 +241,7 @@ export class SmsBowerAdapter implements SmsProvider {
       const res = await fetch(url, { signal: ctrl.signal })
       // SMSBower 错误时返回纯文本（如 BAD_SERVICE / BAD_KEY），需先读 text
       const text = await res.text()
-      console.log(`[smsbower] getPricesV3 status=${res.status} body(前200)=${text.slice(0, 200)}`)
+      console.log(`[smsbower] getPricesV3 status=${res.status}`)
       if (!res.ok || text.startsWith('BAD_') || text.startsWith('ERROR')) {
         throw new Error(`SMSBower getPricesV3 error: ${text || res.status}`)
       }
@@ -365,7 +365,10 @@ export class SmsBowerAdapter implements SmsProvider {
       const iso = options.countryCode.toUpperCase()
       const titleFallback = qualified[0]?.name ?? undefined
       officialCountryId = await this._getOfficialCountryId(iso, titleFallback)
-      console.log(`[smsbower] 官方 country ID 查询: iso=${iso} title=${titleFallback} → officialId=${officialCountryId ?? '未找到，不传 country'}`)
+      console.log(`[smsbower] 官方 country ID 查询: iso=${iso} title=${titleFallback} → officialId=${officialCountryId ?? '未找到'}`)
+      if (officialCountryId === undefined) {
+        throw new Error(`该 CDK 仅限 ${options.countryCode} 国家，但无法确定该国家的官方编号，请联系管理员在国家配置中补充`)
+      }
     }
 
     const params = new URLSearchParams({
@@ -394,7 +397,7 @@ export class SmsBowerAdapter implements SmsProvider {
 
     // getNumberV2 成功返回 JSON，失败返回纯文本错误码
     const rawText = await res.text()
-    console.log(`[smsbower] getNumberV2 status=${res.status} body=${rawText.slice(0, 300)}`)
+    console.log(`[smsbower] getNumberV2 status=${res.status}`)
 
     if (!res.ok || rawText.startsWith('BAD_') || rawText.startsWith('NO_') || rawText.startsWith('ERROR')) {
       throw new Error(`暂无可用号码：${rawText}`)
@@ -411,10 +414,9 @@ export class SmsBowerAdapter implements SmsProvider {
     }
 
     const expiresIn = parseActivationTime(data.activationTime)
-    console.log(
-      `[smsbower] 取号成功 activationId=${data.activationId}` +
-      ` phoneNumber=${data.phoneNumber} activationTime=${data.activationTime} → expiresIn=${expiresIn}s`,
-    )
+    const ph = String(data.phoneNumber)
+    const maskedPhone = ph.length > 4 ? ph.slice(0, -4).replace(/\d/g, '*') + ph.slice(-4) : '****'
+    console.log(`[smsbower] 取号成功 activationId=${data.activationId} phone=${maskedPhone} expiresIn=${expiresIn}s`)
 
     return {
       orderId: String(data.activationId),
@@ -444,7 +446,8 @@ export class SmsBowerAdapter implements SmsProvider {
     if (!res.ok) throw new Error('SMSBower 状态查询失败')
 
     const text = (await res.text()).trim()
-    console.log(`[smsbower] getStatus id=${externalOrderId} response=${text}`)
+    const logText = text.startsWith('STATUS_OK:') ? 'STATUS_OK:***' : text
+    console.log(`[smsbower] getStatus id=${externalOrderId} response=${logText}`)
 
     if (text === 'STATUS_WAIT_CODE') {
       return { status: 'pending' }
@@ -485,11 +488,14 @@ export class SmsBowerAdapter implements SmsProvider {
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), 10000)
     try {
-      await fetch(`${OFFICIAL_BASE}?${params.toString()}`, { signal: ctrl.signal })
+      const res = await fetch(`${OFFICIAL_BASE}?${params.toString()}`, { signal: ctrl.signal })
+      const text = (await res.text()).trim()
+      if (text !== 'ACCESS_CANCEL') {
+        throw new Error(`SMSBower 取消失败: ${text}`)
+      }
     } finally {
       clearTimeout(timer)
     }
-    // 不再静默忽略错误，由调用方决定如何处理（写 audit_log 或记录警告）
   }
 
   // ─── retryOrder（请求再发一条短信，对应 status=3）──────────────────────────
@@ -526,7 +532,11 @@ export class SmsBowerAdapter implements SmsProvider {
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), 10000)
     try {
-      await fetch(`${OFFICIAL_BASE}?${params.toString()}`, { signal: ctrl.signal })
+      const res = await fetch(`${OFFICIAL_BASE}?${params.toString()}`, { signal: ctrl.signal })
+      const text = (await res.text()).trim()
+      if (text !== 'ACCESS_ACTIVATION') {
+        throw new Error(`SMSBower 完成失败: ${text}`)
+      }
     } finally {
       clearTimeout(timer)
     }

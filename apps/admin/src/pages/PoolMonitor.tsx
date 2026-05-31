@@ -285,7 +285,7 @@ function SmsPoolView({ result }: {
   const [tab, setTab] = useState<TabValue>('all')
 
   const displayCountries: PoolCountry[] = tab === 'qualified'
-    ? result.countries.filter(c => c.qualifies).sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999))
+    ? result.countries.filter(c => c.qualifies).sort((a, b) => (a.strategyRank ?? 999) - (b.strategyRank ?? 999))
     : tab === 'blocked'
     ? result.countries.filter(c => c.blocked).sort((a, b) => a.shortName.localeCompare(b.shortName))
     : [...result.countries].sort((a, b) => {

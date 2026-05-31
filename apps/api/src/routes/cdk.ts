@@ -263,6 +263,51 @@ async function checkValidateRateLimit(
   }
 }
 
+// ─── CAS 落败后 re-read 当前订单状态 ─────────────────────────────────────────────
+
+interface OrderState {
+  status: string
+  smsContent?: string | null
+  verificationCode?: string | null
+  canRetry?: boolean
+}
+
+async function reReadOrderState(
+  db: ReturnType<typeof getDb>,
+  orderId: string,
+  cdkId: string,
+  expiresAt: string | null,
+  nowStr: string,
+): Promise<OrderState> {
+  const [cur] = await db.select().from(orders).where(eq(orders.id, orderId))
+  if (!cur) return { status: 'cancelled' }
+
+  if (cur.status === 'completed') {
+    return { status: 'completed', smsContent: cur.smsContent, verificationCode: cur.verificationCode }
+  }
+  if (cur.status === 'expired' || cur.status === 'cancelled') {
+    return { status: cur.status }
+  }
+  if (cur.status === 'received') {
+    const [cdk] = await db
+      .select({ remainingUses: cdks.remainingUses, cdkType: cdks.cdkType })
+      .from(cdks).where(eq(cdks.id, cdkId))
+    const [latestSms] = await db.select().from(orderSms)
+      .where(eq(orderSms.orderId, orderId))
+      .orderBy(sql`${orderSms.receivedAt} DESC`).limit(1)
+    const canRetry = cdk?.cdkType === 'timed'
+      ? (!!expiresAt && expiresAt > nowStr)
+      : (cdk?.remainingUses ?? 0) > 0
+    return {
+      status: 'received',
+      smsContent: latestSms?.smsContent ?? cur.smsContent,
+      verificationCode: latestSms?.verificationCode ?? cur.verificationCode,
+      canRetry,
+    }
+  }
+  return { status: cur.status }
+}
+
 // ─── POST /api/cdk/validate ───────────────────────────────────────────────────
 
 app.post('/validate', async (c) => {
@@ -368,7 +413,7 @@ app.post('/validate', async (c) => {
     const [activeOrder] = await db.select().from(orders).where(eq(orders.id, activeOrderId))
 
     if (!activeOrder) {
-      void writeAuditLog(db, 'cdk.validated', 'cdk', row.id, { requestId, ip })
+      await writeAuditLog(db, 'cdk.validated', 'cdk', row.id, { requestId, ip })
       return c.json(baseResponse)
     }
 
@@ -392,7 +437,7 @@ app.post('/validate', async (c) => {
         ? !!activeOrder.expiresAt && activeOrder.expiresAt > now
         : row.remainingUses > 0
 
-    void writeAuditLog(db, 'cdk.validated', 'cdk', row.id, { requestId, ip, resumedOrderId: activeOrderId })
+    await writeAuditLog(db, 'cdk.validated', 'cdk', row.id, { requestId, ip, resumedOrderId: activeOrderId })
     return c.json({
       ...baseResponse,
       activeOrder: {
@@ -409,7 +454,7 @@ app.post('/validate', async (c) => {
     })
   }
 
-  void writeAuditLog(db, 'cdk.validated', 'cdk', row.id, { requestId, ip })
+  await writeAuditLog(db, 'cdk.validated', 'cdk', row.id, { requestId, ip })
   return c.json(baseResponse)
 })
 
@@ -464,11 +509,6 @@ app.post('/order', async (c) => {
   const expiredOrders2 = activeOrders2.filter(o => o.expiresAt && o.expiresAt < checkNow)
   for (const eo of expiredOrders2) {
     await expireOrder(db, eo.id, eo.status, body.cdkId, cdkRow.cdkType, checkNow)
-  }
-
-  const stillActive2 = activeOrders2.filter(o => !expiredOrders2.some(e => e.id === o.id))
-  if (stillActive2.length > 0) {
-    return c.json({ error: 'CDK 正在使用中，请等待当前流程完成' }, 400)
   }
 
   // 确定要使用的 service
@@ -560,19 +600,28 @@ app.post('/order', async (c) => {
     return c.json({ error: '找不到可用的服务提供商，请联系管理员' }, 500)
   }
 
-  // 插入 pending 订单
+  // 原子条件 INSERT：仅当该 CDK 没有 pending/received 活跃订单时才插入
+  // 防止并发请求双双通过前面的检查，导致重复取号
   const orderId = crypto.randomUUID()
   const now = new Date().toISOString()
 
-  await db.insert(orders).values({
-    id: orderId,
-    cdkId: body.cdkId,
-    serviceId: serviceRow.id,
-    status: 'pending',
-    createdAt: now,
-    fromOrderId: body.fromOrderId ?? null,
-    ipAddress: ip,
-  })
+  const insertResult = await c.env.DB.prepare(`
+    INSERT INTO orders (id, cdk_id, service_id, status, created_at, from_order_id, ip_address)
+    SELECT ?, ?, ?, 'pending', ?, ?, ?
+    WHERE NOT EXISTS (
+      SELECT 1 FROM orders
+      WHERE cdk_id = ?
+        AND status IN ('pending', 'received')
+        AND (expires_at IS NULL OR expires_at > ?)
+    )
+  `).bind(
+    orderId, body.cdkId, serviceRow.id, now, body.fromOrderId ?? null, ip,
+    body.cdkId, now,
+  ).run()
+
+  if (insertResult.meta.changes === 0) {
+    return c.json({ error: 'CDK 正在使用中，请等待当前流程完成' }, 400)
+  }
 
   try {
     const apiKey = getApiKey(serviceRow.providerSlug, c.env)
@@ -597,7 +646,7 @@ app.post('/order', async (c) => {
       .where(eq(orders.id, orderId))
 
     log('order.created', { requestId, orderId, cdkId: body.cdkId, serviceId: serviceRow.id, ip })
-    void writeAuditLog(db, 'order.created', 'order', orderId, { requestId, cdkId: body.cdkId, serviceId: serviceRow.id, ip })
+    await writeAuditLog(db, 'order.created', 'order', orderId, { requestId, cdkId: body.cdkId, serviceId: serviceRow.id, ip })
 
     return c.json({ orderId, phoneNumber: result.phoneNumber, expiresIn: result.expiresIn, expiresAt, changeCount: 0, orderedAt: now })
   } catch (err) {
@@ -714,36 +763,34 @@ app.get('/order/:orderId/status', async (c) => {
     const pollResult = await adapter.pollOrder(order.externalOrderId)
     const now = new Date().toISOString()
 
-    // SMSBower：收到短信（received）
+    // 收到短信（received）
     if (pollResult.status === 'received') {
-      // 写入 order_sms 记录
-      const smsId = crypto.randomUUID()
+      // CAS：只有仍为 pending 的一方才能推进，防并发重复扣减
+      const casReceived = await c.env.DB.prepare(
+        `UPDATE orders SET status = 'received', sms_content = ?, verification_code = ?
+         WHERE id = ? AND status = 'pending'`,
+      ).bind(pollResult.smsContent ?? null, pollResult.verificationCode ?? null, orderId).run()
+
+      if (casReceived.meta.changes === 0) {
+        // 落败方：从 DB 读取真实当前状态返回
+        return c.json(await reReadOrderState(db, orderId, order.cdkId, order.expiresAt, now))
+      }
+
+      // CAS 成功：写 order_sms，扣减 CDK
       await db.insert(orderSms).values({
-        id: smsId,
+        id: crypto.randomUUID(),
         orderId,
         smsContent: pollResult.smsContent ?? '',
         verificationCode: pollResult.verificationCode ?? '',
         receivedAt: now,
       })
 
-      await db
-        .update(orders)
-        .set({
-          status: 'received',
-          smsContent: pollResult.smsContent ?? null,
-          verificationCode: pollResult.verificationCode ?? null,
-        })
-        .where(eq(orders.id, orderId))
-
-      // 获取 CDK 信息决定扣减逻辑
       const [cdk] = await db.select().from(cdks).where(eq(cdks.id, order.cdkId))
       let canRetry: boolean
 
       if (cdk?.cdkType === 'timed') {
-        // 时效型 CDK：不扣次数，canRetry = expiresAt > now
         canRetry = !!order.expiresAt && order.expiresAt > now
       } else {
-        // 按次型 CDK：扣减次数
         let newRemaining = cdk?.remainingUses ?? 0
         if (cdk) {
           newRemaining = Math.max(0, cdk.remainingUses - 1)
@@ -752,13 +799,13 @@ app.get('/order/:orderId/status', async (c) => {
             .set({ remainingUses: newRemaining, status: newRemaining === 0 ? 'exhausted' : cdk.status })
             .where(eq(cdks.id, order.cdkId))
           if (newRemaining === 0) {
-            void writeAuditLog(db, 'cdk.exhausted', 'cdk', order.cdkId, { requestId, orderId, trigger: 'received' })
+            await writeAuditLog(db, 'cdk.exhausted', 'cdk', order.cdkId, { requestId, orderId, trigger: 'received' })
           }
         }
         canRetry = newRemaining > 0
       }
 
-      void writeAuditLog(db, 'order.status_changed', 'order', orderId, { requestId, from: 'pending', to: 'received' })
+      await writeAuditLog(db, 'order.status_changed', 'order', orderId, { requestId, from: 'pending', to: 'received' })
       return c.json({
         status: 'received',
         smsContent: pollResult.smsContent,
@@ -768,17 +815,18 @@ app.get('/order/:orderId/status', async (c) => {
     }
 
     if (pollResult.status === 'completed') {
-      await db
-        .update(orders)
-        .set({
-          status: 'completed',
-          smsContent: pollResult.smsContent ?? null,
-          verificationCode: pollResult.verificationCode ?? null,
-          completedAt: now,
-        })
-        .where(eq(orders.id, orderId))
+      // CAS：同上，只有仍为 pending 的一方才扣减
+      const casCompleted = await c.env.DB.prepare(
+        `UPDATE orders SET status = 'completed', sms_content = ?, verification_code = ?, completed_at = ?
+         WHERE id = ? AND status = 'pending'`,
+      ).bind(pollResult.smsContent ?? null, pollResult.verificationCode ?? null, now, orderId).run()
 
-      // 按次型 CDK 扣减（completed 路径）
+      if (casCompleted.meta.changes === 0) {
+        // 落败方：从 DB 读取真实当前状态返回
+        return c.json(await reReadOrderState(db, orderId, order.cdkId, order.expiresAt, now))
+      }
+
+      // CAS 成功：按次型 CDK 扣减
       const [cdk] = await db.select().from(cdks).where(eq(cdks.id, order.cdkId))
       if (cdk && cdk.cdkType !== 'timed') {
         const newRemaining = Math.max(0, cdk.remainingUses - 1)
@@ -787,11 +835,11 @@ app.get('/order/:orderId/status', async (c) => {
           .set({ remainingUses: newRemaining, status: newRemaining === 0 ? 'exhausted' : cdk.status })
           .where(eq(cdks.id, order.cdkId))
         if (newRemaining === 0) {
-          void writeAuditLog(db, 'cdk.exhausted', 'cdk', order.cdkId, { requestId, orderId, trigger: 'completed' })
+          await writeAuditLog(db, 'cdk.exhausted', 'cdk', order.cdkId, { requestId, orderId, trigger: 'completed' })
         }
       }
 
-      void writeAuditLog(db, 'order.status_changed', 'order', orderId, { requestId, from: 'pending', to: 'completed' })
+      await writeAuditLog(db, 'order.status_changed', 'order', orderId, { requestId, from: 'pending', to: 'completed' })
       return c.json({
         status: 'completed',
         smsContent: pollResult.smsContent,
@@ -918,9 +966,7 @@ app.post('/order/:orderId/finish', async (c) => {
 
   try {
     const adapter = getProvider(providerSlug, getApiKey(providerSlug, c.env))
-    await adapter.confirmOrder(order.externalOrderId).catch((err: unknown) =>
-      console.warn(`[finish] confirmOrder failed for order ${orderId}:`, err),
-    )
+    await adapter.confirmOrder(order.externalOrderId)
 
     const now = new Date().toISOString()
     await db
@@ -982,10 +1028,10 @@ app.post('/order/:orderId/cancel', async (c) => {
   try {
     const adapter = getProvider(providerSlug, getApiKey(providerSlug, c.env))
     if (cancelledReason === 'user_switched_pool') {
-      await adapter.cancelOrder(order.externalOrderId).catch((err: unknown) => {
+      await adapter.cancelOrder(order.externalOrderId).catch(async (err: unknown) => {
         const errMsg = err instanceof Error ? err.message : String(err)
         console.warn(`[cancel] cancelOrder failed for order ${orderId} (switch):`, err)
-        void writeAuditLog(db, 'cancel.failed', 'order', orderId, { requestId, provider: providerSlug, error: errMsg, reason: cancelledReason })
+        await writeAuditLog(db, 'cancel.failed', 'order', orderId, { requestId, provider: providerSlug, error: errMsg, reason: cancelledReason })
       })
     } else {
       await adapter.cancelOrder(order.externalOrderId)
@@ -1060,11 +1106,14 @@ app.post('/order/:orderId/change', async (c) => {
   try {
     const adapter = getProvider(serviceRow.providerSlug, getApiKey(serviceRow.providerSlug, c.env))
 
-    await adapter.cancelOrder(order.externalOrderId).catch((err: unknown) => {
-      const errMsg = err instanceof Error ? err.message : String(err)
-      console.warn(`[change] cancelOrder failed for order ${orderId}:`, err)
-      void writeAuditLog(db, 'cancel.failed', 'order', orderId, { requestId, provider: serviceRow.providerSlug, error: errMsg, reason: 'change' })
-    })
+    try {
+      await adapter.cancelOrder(order.externalOrderId)
+    } catch (cancelErr: unknown) {
+      const errMsg = cancelErr instanceof Error ? cancelErr.message : String(cancelErr)
+      console.warn(`[change] cancelOrder failed for order ${orderId}:`, cancelErr)
+      await writeAuditLog(db, 'cancel.failed', 'order', orderId, { requestId, provider: serviceRow.providerSlug, error: errMsg, reason: 'change' })
+      throw cancelErr  // 取消失败则中止，不继续购买新号
+    }
 
     const result = await adapter.orderNumber(serviceRow.externalServiceId!, {
       maxPrice: serviceRow.maxPrice!,

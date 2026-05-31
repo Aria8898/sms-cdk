@@ -34,6 +34,7 @@ export interface ServiceCategory {
 export interface Service {
   id: string
   providerId: string
+  name: string
   providerName: string
   providerAlias: string
   categoryId: string
