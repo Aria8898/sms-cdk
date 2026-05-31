@@ -236,25 +236,31 @@ async function checkValidateRateLimit(
   ip: string,
   max: number,
 ): Promise<boolean> {
-  const key = `validate:${ip}`
-  await db.run(sql`
-    INSERT INTO rate_limits (key, count, window_start)
-    VALUES (${key}, 1, datetime('now'))
-    ON CONFLICT(key) DO UPDATE SET
-      count = CASE
-        WHEN window_start > datetime('now', '-60 seconds') THEN count + 1
-        ELSE 1
-      END,
-      window_start = CASE
-        WHEN window_start > datetime('now', '-60 seconds') THEN window_start
-        ELSE datetime('now')
-      END
-  `)
-  const [row] = await db
-    .select({ count: rateLimits.count })
-    .from(rateLimits)
-    .where(eq(rateLimits.key, key))
-  return (row?.count ?? 1) <= max
+  try {
+    const key = `validate:${ip}`
+    await db.run(sql`
+      INSERT INTO rate_limits (key, count, window_start)
+      VALUES (${key}, 1, datetime('now'))
+      ON CONFLICT(key) DO UPDATE SET
+        count = CASE
+          WHEN window_start > datetime('now', '-60 seconds') THEN count + 1
+          ELSE 1
+        END,
+        window_start = CASE
+          WHEN window_start > datetime('now', '-60 seconds') THEN window_start
+          ELSE datetime('now')
+        END
+    `)
+    const [row] = await db
+      .select({ count: rateLimits.count })
+      .from(rateLimits)
+      .where(eq(rateLimits.key, key))
+    return (row?.count ?? 1) <= max
+  } catch (err) {
+    // rate_limits 表不存在（migration 未 apply）时 fail-open，不阻断正常请求
+    console.warn('[rate-limit] D1 query failed, failing open:', err)
+    return true
+  }
 }
 
 // ─── POST /api/cdk/validate ───────────────────────────────────────────────────

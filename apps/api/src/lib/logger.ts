@@ -1,3 +1,5 @@
+import { getDb, auditLogs } from '../db'
+
 /**
  * 结构化 JSON 日志工具
  * 输出到 console.log，Cloudflare Workers Dashboard 可实时 tail 并按字段过滤
@@ -10,14 +12,13 @@ export function log(event: string, meta: Record<string, unknown> = {}): void {
  * 写入 D1 audit_logs 表（持久审计，异步尽力写入，失败不影响主流程）
  */
 export async function writeAuditLog(
-  db: ReturnType<typeof import('../db').getDb>,
+  db: ReturnType<typeof getDb>,
   event: string,
   entityType: 'cdk' | 'order',
   entityId: string,
   meta?: Record<string, unknown>,
 ): Promise<void> {
   try {
-    const { auditLogs } = await import('../db')
     await db.insert(auditLogs).values({
       id: crypto.randomUUID(),
       event,
@@ -27,7 +28,7 @@ export async function writeAuditLog(
       createdAt: new Date().toISOString(),
     })
   } catch (err) {
-    // 审计日志写入失败不影响主流程，仅打印警告
+    // audit_logs 表不存在（migration 未 apply）或其他写入失败，不影响主流程
     console.warn('[audit] write failed:', err)
   }
 }
