@@ -111,3 +111,11 @@ export const rateLimits = sqliteTable('rate_limits', {
   count: integer('count').notNull().default(1),
   windowStart: text('window_start').notNull(),
 })
+
+// provider_tokens：yamasakisms 等需要登录的平台的 access_token 持久化（Migration 0015）
+export const providerTokens = sqliteTable('provider_tokens', {
+  providerSlug: text('provider_slug').primaryKey(), // 如 "yamasakisms"
+  accessToken: text('access_token').notNull(),
+  expiresAt: text('expires_at').notNull(),          // ISO 8601
+  updatedAt: text('updated_at').notNull(),
+})

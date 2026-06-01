@@ -1,11 +1,13 @@
 import { Routes, Route } from 'react-router-dom'
 import Layout from './components/Layout'
 import Home from './pages/Home'
+import BoundCdk from './pages/BoundCdk'
 
 export default function App() {
   return (
     <Routes>
       <Route element={<Layout />}>
+        <Route path="/bound" element={<BoundCdk />} />
         <Route path="/*" element={<Home />} />
       </Route>
     </Routes>

@@ -8,7 +8,7 @@ export default function CdkGenerate() {
   const [isLoadingCategories, setIsLoadingCategories] = useState(true)
   const [categoryId, setCategoryId] = useState('')
   const [countryCode, setCountryCode] = useState('')
-  const [cdkType, setCdkType] = useState<'count' | 'timed'>('count')
+  const [cdkType, setCdkType] = useState<'count' | 'timed' | 'bound'>('count')
   const [usesPerCdk, setUsesPerCdk] = useState(1)
   const [validityMinutes, setValidityMinutes] = useState(60)
   const [quantity, setQuantity] = useState(10)
@@ -52,7 +52,7 @@ export default function CdkGenerate() {
     try {
       const result = await cdksApi.generate({
         categoryId,
-        usesPerCdk: cdkType === 'timed' ? 1 : usesPerCdk,
+        usesPerCdk: (cdkType === 'timed' || cdkType === 'bound') ? 1 : usesPerCdk,
         quantity,
         countryCode: trimmedCountry || undefined,
         cdkType,
@@ -110,22 +110,24 @@ export default function CdkGenerate() {
           {/* CDK 类型选择 */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">CDK 类型</label>
-            <div className="grid grid-cols-2 gap-2">
-              {(['count', 'timed'] as const).map(t => (
+            <div className="grid grid-cols-3 gap-2">
+              {([
+                { value: 'count', label: '按次', desc: '每次收码扣 1 次' },
+                { value: 'timed', label: '时效', desc: '有效期内无限接码' },
+                { value: 'bound', label: '号码绑定', desc: '取号即消耗，持续接码' },
+              ] as const).map(t => (
                 <button
-                  key={t}
+                  key={t.value}
                   type="button"
-                  onClick={() => setCdkType(t)}
+                  onClick={() => setCdkType(t.value)}
                   className={`px-3 py-2 rounded-lg border text-sm font-medium transition-colors text-left ${
-                    cdkType === t
+                    cdkType === t.value
                       ? 'border-blue-500 bg-blue-50 text-blue-700'
                       : 'border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50'
                   }`}
                 >
-                  {t === 'count' ? '按次' : '时效'}
-                  <p className="text-xs font-normal mt-0.5 text-current opacity-70">
-                    {t === 'count' ? '每次收码扣 1 次' : '有效期内无限接码'}
-                  </p>
+                  {t.label}
+                  <p className="text-xs font-normal mt-0.5 text-current opacity-70">{t.desc}</p>
                 </button>
               ))}
             </div>
@@ -151,7 +153,7 @@ export default function CdkGenerate() {
             )}
           </div>
 
-          {cdkType === 'count' ? (
+          {cdkType === 'count' && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">每张可用次数</label>
               <input
@@ -162,7 +164,9 @@ export default function CdkGenerate() {
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
-          ) : (
+          )}
+
+          {cdkType === 'timed' && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 有效时长（分钟）
@@ -179,6 +183,12 @@ export default function CdkGenerate() {
               <p className="mt-1 text-xs text-gray-400">
                 ≈ {(validityMinutes / 60).toFixed(1)} 小时
               </p>
+            </div>
+          )}
+
+          {cdkType === 'bound' && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800">
+              号码绑定型：取号时 CDK 立刻消耗，有效期固定至次日 07:00（北京时间）。08:00 前不开放取号。
             </div>
           )}
 
@@ -205,7 +215,9 @@ export default function CdkGenerate() {
             <p className="text-xs text-gray-400">
               {cdkType === 'timed'
                 ? `时效型：有效期 ${validityMinutes} 分钟，有效期内无限接码`
-                : `按次型：每张 ${usesPerCdk} 次`}
+                : cdkType === 'bound'
+                  ? '号码绑定型：取号即消耗，有效期至次日 07:00'
+                  : `按次型：每张 ${usesPerCdk} 次`}
             </p>
           </div>
 

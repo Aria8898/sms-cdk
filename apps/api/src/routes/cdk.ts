@@ -12,10 +12,33 @@ import {
   rateLimits,
   auditLogs,
 } from '../db'
-import { getProvider, getApiKey } from '../adapters'
+import { getProvider, getApiKey, getBoundProvider } from '../adapters'
 import type { PoolCountryStatus } from '../adapters/types'
 import type { Bindings, Variables } from '../types'
 import { log, writeAuditLog } from '../lib/logger'
+
+// ─── Bound CDK 工具函数 ───────────────────────────────────────────────────────
+
+/**
+ * 计算 bound CDK 的到期时间：取号当日 +1 日 07:00:00 (UTC+8)
+ * 取号时间必须在 08:00–23:59 (UTC+8)，否则返回 null 表示拒绝取号。
+ */
+function calcBoundExpiresAt(nowUtc: Date): { expiresAt: string } | null {
+  // 转换为北京时间（UTC+8）
+  const bjOffset = 8 * 60 * 60 * 1000
+  const bjNow = new Date(nowUtc.getTime() + bjOffset)
+  const bjHour = bjNow.getUTCHours()
+
+  // 00:00–07:59 拒绝取号
+  if (bjHour < 8) return null
+
+  // 次日 07:00:00 (UTC+8) = 次日 UTC 23:00:00
+  const bjDate = new Date(Date.UTC(bjNow.getUTCFullYear(), bjNow.getUTCMonth(), bjNow.getUTCDate()))
+  const nextDay07BJ = new Date(bjDate.getTime() + 24 * 60 * 60 * 1000 + 7 * 60 * 60 * 1000)
+  // 转回 UTC
+  const expiresAt = new Date(nextDay07BJ.getTime() - bjOffset).toISOString()
+  return { expiresAt }
+}
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>()
 
@@ -328,6 +351,7 @@ app.post('/validate', async (c) => {
   const [row] = await db
     .select({
       id: cdks.id,
+      code: cdks.code,
       status: cdks.status,
       remainingUses: cdks.remainingUses,
       totalUses: cdks.totalUses,
@@ -351,6 +375,65 @@ app.post('/validate', async (c) => {
   if (row.status === 'disabled') {
     return c.json({ error: 'CDK 不存在或已失效' }, 404)
   }
+
+  // ── 号码绑定型（bound）特殊处理 ─────────────────────────────────────────────
+  if (row.cdkType === 'bound') {
+    await writeAuditLog(db, 'cdk.validated', 'cdk', row.id, { requestId, ip })
+
+    // bound CDK 已耗尽（已取号）→ 查关联订单
+    if (row.status === 'exhausted') {
+      const [boundOrder] = await db
+        .select()
+        .from(orders)
+        .where(eq(orders.cdkId, row.id))
+        .orderBy(sql`${orders.createdAt} DESC`)
+        .limit(1)
+
+      const nowIso = new Date().toISOString()
+
+      if (!boundOrder) {
+        return c.json({ error: 'CDK 已使用但未找到关联订单' }, 400)
+      }
+
+      // 已过期
+      if (boundOrder.status === 'expired' || (boundOrder.expiresAt && boundOrder.expiresAt < nowIso)) {
+        // 若 DB 状态未更新，顺手标记
+        if (boundOrder.status !== 'expired') {
+          await db.update(orders).set({ status: 'expired', completedAt: nowIso }).where(eq(orders.id, boundOrder.id))
+        }
+        return c.json({
+          error: '号码已过期，无法继续接收验证码',
+          expiredAt: boundOrder.expiresAt,
+          boundAt: boundOrder.orderedAt ?? boundOrder.createdAt,
+        }, 400)
+      }
+
+      // 仍有效
+      const selfBase = c.env.SELF_BASE_URL ?? 'https://sms.985008.xyz'
+      return c.json({
+        cdkId: row.id,
+        cdkType: 'bound',
+        activeOrder: {
+          orderId: boundOrder.id,
+          phoneNumber: boundOrder.phoneNumber,
+          codeApiUrl: `${selfBase}/api/${row.code}`,
+          expiresAt: boundOrder.expiresAt,
+          boundAt: boundOrder.orderedAt ?? boundOrder.createdAt,
+        },
+      })
+    }
+
+    // bound CDK 尚未取号（status=active）→ 直接返回可取号状态，不需要号池信息
+    return c.json({
+      cdkId: row.id,
+      service: { name: row.serviceName },
+      cdkType: 'bound',
+      remaining: null,
+      total: null,
+      pools: [],
+    })
+  }
+  // ── end bound 处理 ─────────────────────────────────────────────────────────
 
   // 时效型 CDK 已耗尽：返回过期信息
   if (row.status === 'exhausted' && row.cdkType === 'timed') {
@@ -470,6 +553,7 @@ app.post('/order', async (c) => {
   const [cdkRow] = await db
     .select({
       cdkId: cdks.id,
+      code: cdks.code,
       cdkStatus: cdks.status,
       remainingUses: cdks.remainingUses,
       categoryId: cdks.categoryId,
@@ -488,6 +572,110 @@ app.post('/order', async (c) => {
   if (cdkRow.cdkStatus === 'disabled') {
     return c.json({ error: 'CDK 已停用' }, 400)
   }
+
+  // ── 号码绑定型（bound）取号流程 ────────────────────────────────────────────
+  if (cdkRow.cdkType === 'bound') {
+    if (cdkRow.cdkStatus === 'exhausted') {
+      return c.json({ error: 'CDK 已取号，不可重复取号' }, 400)
+    }
+
+    // 取号时间检查（北京时间 08:00–23:59）
+    const nowDate = new Date()
+    const expiresResult = calcBoundExpiresAt(nowDate)
+    if (!expiresResult) {
+      return c.json({ error: '08:00 前不开放取号，请 08:00 后再来取号' }, 400)
+    }
+
+    // 解析 service（用于获取 providerSlug 和 externalServiceId = yamasakisms platform_id）
+    const [boundService] = await db
+      .select({
+        id: services.id,
+        externalServiceId: services.externalServiceId,
+        providerSlug: providers.slug,
+      })
+      .from(services)
+      .leftJoin(providers, eq(providers.id, services.providerId))
+      .where(cdkRow.categoryId
+        ? and(eq(services.categoryId, cdkRow.categoryId), eq(services.isDefault, true))
+        : eq(services.id, cdkRow.serviceId))
+      .limit(1)
+
+    // 若无 isDefault，回退到第一条
+    const [effectiveService] = boundService
+      ? [boundService]
+      : await db
+          .select({
+            id: services.id,
+            externalServiceId: services.externalServiceId,
+            providerSlug: providers.slug,
+          })
+          .from(services)
+          .leftJoin(providers, eq(providers.id, services.providerId))
+          .where(cdkRow.categoryId
+            ? eq(services.categoryId, cdkRow.categoryId)
+            : eq(services.id, cdkRow.serviceId))
+          .limit(1)
+
+    if (!effectiveService?.providerSlug || !effectiveService.externalServiceId) {
+      return c.json({ error: '找不到可用的服务提供商，请联系管理员' }, 500)
+    }
+
+    const nowIso = nowDate.toISOString()
+    const orderId = crypto.randomUUID()
+
+    // 原子 INSERT：防止 CDK 并发双取
+    const insertRes = await c.env.DB.prepare(`
+      INSERT INTO orders (id, cdk_id, service_id, status, created_at, ordered_at, ip_address)
+      SELECT ?, ?, ?, 'active', ?, ?, ?
+      WHERE NOT EXISTS (
+        SELECT 1 FROM orders WHERE cdk_id = ? AND status = 'active'
+      )
+    `).bind(
+      orderId, cdkRow.cdkId, effectiveService.id, nowIso, nowIso, ip,
+      cdkRow.cdkId,
+    ).run()
+
+    if (insertRes.meta.changes === 0) {
+      return c.json({ error: 'CDK 已取号或存在进行中的绑定订单' }, 400)
+    }
+
+    try {
+      const adapter = getBoundProvider(effectiveService.providerSlug, c.env, c.env.DB)
+      const { orderNo, phoneNumber } = await adapter.takeNumber(effectiveService.externalServiceId)
+
+      const { expiresAt } = expiresResult
+      await db
+        .update(orders)
+        .set({ externalOrderId: orderNo, phoneNumber, expiresAt })
+        .where(eq(orders.id, orderId))
+
+      // 标记 CDK 为 exhausted
+      await db.update(cdks).set({ status: 'exhausted' }).where(eq(cdks.id, cdkRow.cdkId))
+
+      await writeAuditLog(db, 'order.created', 'order', orderId, {
+        requestId, cdkId: cdkRow.cdkId, serviceId: effectiveService.id, ip, cdkType: 'bound',
+      })
+      await writeAuditLog(db, 'cdk.exhausted', 'cdk', cdkRow.cdkId, { requestId, orderId, trigger: 'bound.takeNumber' })
+
+      const selfBase = c.env.SELF_BASE_URL ?? 'https://sms.985008.xyz'
+
+      return c.json({
+        orderId,
+        phoneNumber,
+        codeApiUrl: `${selfBase}/api/${cdkRow.code}`,
+        expiresAt,
+        boundAt: nowIso,
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '取号失败，请稍后重试'
+      await db
+        .update(orders)
+        .set({ status: 'cancelled', errorMessage: message, completedAt: nowIso })
+        .where(eq(orders.id, orderId))
+      return c.json({ error: message }, 400)
+    }
+  }
+  // ── end bound 处理 ─────────────────────────────────────────────────────────
 
   if (cdkRow.cdkType !== 'timed' && (cdkRow.remainingUses === 0 || cdkRow.cdkStatus === 'exhausted')) {
     return c.json({ error: 'CDK 次数已用完' }, 400)

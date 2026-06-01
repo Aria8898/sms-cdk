@@ -50,3 +50,13 @@ export interface SmsProvider {
   /** SMSBower：确认激活结束（status=6），其他适配器可 no-op */
   confirmOrder(externalOrderId: string): Promise<void>
 }
+
+/** 号码绑定型平台接口（yamasakisms 等），取号即消耗，持续接码 */
+export interface BoundSmsProvider {
+  /** 取号，返回 order_no 和手机号 */
+  takeNumber(platformId: string): Promise<{ orderNo: string; phoneNumber: string }>
+  /** 获取最新验证码，无码时返回 null */
+  getLatestCode(orderNo: string): Promise<{ code: string; codeTime: string } | null>
+  /** 释放号码（目前仅管理员手动处理，此方法预留备用） */
+  releaseNumber(orderNo: string): Promise<void>
+}

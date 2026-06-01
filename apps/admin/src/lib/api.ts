@@ -222,7 +222,7 @@ export const cdksApi = {
     usesPerCdk: number
     quantity: number
     countryCode?: string
-    cdkType?: 'count' | 'timed'
+    cdkType?: 'count' | 'timed' | 'bound'
     validityMinutes?: number
   }) =>
     request<{ cdks: Cdk[] }>('/api/cdks/generate', { method: 'POST', body: JSON.stringify(data) }),
@@ -233,4 +233,12 @@ export const cdksApi = {
     request<Cdk>(`/api/cdks/${id}/enable`, { method: 'PATCH' }),
   delete: (id: string) =>
     request<{ success: boolean }>(`/api/cdks/${id}`, { method: 'DELETE' }),
+  manualBind: (data: { cdkCode: string; phoneNumber: string; orderNo: string }) =>
+    request<{ orderId: string; expiresAt: string }>('/api/cdks/manual-bind', {
+      method: 'POST', body: JSON.stringify(data),
+    }),
+  rebind: (orderId: string, data: { newPhoneNumber: string; newOrderNo: string }) =>
+    request<{ success: boolean; newExpiresAt: string }>(`/api/cdks/orders/${orderId}/rebind`, {
+      method: 'POST', body: JSON.stringify(data),
+    }),
 }

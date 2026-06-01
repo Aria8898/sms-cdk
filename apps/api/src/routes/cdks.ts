@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { eq, sql, and, inArray } from 'drizzle-orm'
-import { getDb, cdks, services, serviceCategories, orders, orderSms } from '../db'
+import { getDb, cdks, services, serviceCategories, orders, orderSms, providers, auditLogs } from '../db'
 import { authMiddleware } from '../middleware/auth'
 import type { Bindings } from '../types'
 
@@ -134,7 +134,7 @@ app.post('/generate', async (c) => {
     usesPerCdk: number
     quantity: number
     countryCode?: string
-    cdkType?: 'count' | 'timed'
+    cdkType?: 'count' | 'timed' | 'bound'
     validityMinutes?: number
   }>()
 
@@ -172,12 +172,12 @@ app.post('/generate', async (c) => {
   const serviceId = fallbackService.id
   const countryCode = body.countryCode?.trim().toUpperCase() || undefined
   const cdkType = body.cdkType ?? 'count'
-  // 后端强制范围校验：1–10080 分钟（最短 1 分钟，最长 7 天）
+  // 后端强制范围校验：1–10080 分钟（最短 1 分钟，最长 7 天）；bound 类型不使用
   const validityMinutes = cdkType === 'timed'
     ? Math.min(10080, Math.max(1, body.validityMinutes ?? 60))
     : null
-  // 时效型 CDK usesPerCdk 无实际意义，统一存 1
-  const usesPerCdk = cdkType === 'timed' ? 1 : Math.max(1, body.usesPerCdk ?? 1)
+  // bound/timed CDK usesPerCdk 无实际意义，统一存 1
+  const usesPerCdk = (cdkType === 'timed' || cdkType === 'bound') ? 1 : Math.max(1, body.usesPerCdk ?? 1)
 
   const createdAt = new Date().toISOString()
   const newCdks = []
@@ -203,6 +203,137 @@ app.post('/generate', async (c) => {
   await db.insert(cdks).values(newCdks)
 
   return c.json({ cdks: newCdks }, 201)
+})
+
+// ─── POST /api/cdks/manual-bind — 管理员手动绑定 bound CDK ───────────────────
+
+app.post('/manual-bind', async (c) => {
+  const body = await c.req.json<{
+    cdkCode: string
+    phoneNumber: string
+    orderNo: string
+  }>()
+
+  if (!body.cdkCode || !body.phoneNumber || !body.orderNo) {
+    return c.json({ error: '缺少必要参数：cdkCode / phoneNumber / orderNo' }, 400)
+  }
+
+  const db = getDb(c.env.DB)
+
+  const [cdk] = await db.select().from(cdks).where(eq(cdks.code, body.cdkCode))
+  if (!cdk) {
+    return c.json({ error: 'CDK 不存在' }, 404)
+  }
+  if (cdk.cdkType !== 'bound') {
+    return c.json({ error: '只有号码绑定型 CDK 支持手动绑定' }, 400)
+  }
+  if (cdk.status !== 'active') {
+    return c.json({ error: 'CDK 已使用或已停用，不可手动绑定' }, 400)
+  }
+
+  // 计算到期时间：换号当日次日 07:00 (UTC+8)
+  const now = new Date()
+  const bjOffset = 8 * 60 * 60 * 1000
+  const bjNow = new Date(now.getTime() + bjOffset)
+  const bjDate = new Date(Date.UTC(bjNow.getUTCFullYear(), bjNow.getUTCMonth(), bjNow.getUTCDate()))
+  const nextDay07BJ = new Date(bjDate.getTime() + 24 * 60 * 60 * 1000 + 7 * 60 * 60 * 1000)
+  const expiresAt = new Date(nextDay07BJ.getTime() - bjOffset).toISOString()
+  const nowIso = now.toISOString()
+
+  const orderId = crypto.randomUUID()
+
+  await db.insert(orders).values({
+    id: orderId,
+    cdkId: cdk.id,
+    externalOrderId: body.orderNo,
+    phoneNumber: body.phoneNumber,
+    status: 'active',
+    createdAt: nowIso,
+    orderedAt: nowIso,
+    expiresAt,
+    changeCount: 0,
+  })
+
+  await db.update(cdks).set({ status: 'exhausted' }).where(eq(cdks.id, cdk.id))
+
+  await db.insert(auditLogs).values({
+    id: crypto.randomUUID(),
+    event: 'order.created',
+    entityType: 'order',
+    entityId: orderId,
+    meta: JSON.stringify({ cdkCode: body.cdkCode, phoneNumber: body.phoneNumber, orderNo: body.orderNo, operatedBy: 'admin', trigger: 'manual-bind' }),
+    createdAt: nowIso,
+  })
+
+  return c.json({ orderId, expiresAt }, 201)
+})
+
+// ─── POST /api/cdks/orders/:id/rebind — 管理员换号 ───────────────────────────
+
+app.post('/orders/:id/rebind', async (c) => {
+  const orderId = c.req.param('id')
+  const body = await c.req.json<{
+    newPhoneNumber: string
+    newOrderNo: string
+  }>()
+
+  if (!body.newPhoneNumber || !body.newOrderNo) {
+    return c.json({ error: '缺少必要参数：newPhoneNumber / newOrderNo' }, 400)
+  }
+
+  const db = getDb(c.env.DB)
+
+  const [order] = await db.select().from(orders).where(eq(orders.id, orderId))
+  if (!order) {
+    return c.json({ error: '订单不存在' }, 404)
+  }
+
+  const [cdk] = await db.select().from(cdks).where(eq(cdks.id, order.cdkId))
+  if (!cdk || cdk.cdkType !== 'bound') {
+    return c.json({ error: '只有号码绑定型订单可以换号' }, 400)
+  }
+  if (order.status !== 'active') {
+    return c.json({ error: '只有生效中的订单可以换号' }, 400)
+  }
+
+  // 计算新到期时间：换号当日次日 07:00 (UTC+8)
+  const now = new Date()
+  const bjOffset = 8 * 60 * 60 * 1000
+  const bjNow = new Date(now.getTime() + bjOffset)
+  const bjDate = new Date(Date.UTC(bjNow.getUTCFullYear(), bjNow.getUTCMonth(), bjNow.getUTCDate()))
+  const nextDay07BJ = new Date(bjDate.getTime() + 24 * 60 * 60 * 1000 + 7 * 60 * 60 * 1000)
+  const newExpiresAt = new Date(nextDay07BJ.getTime() - bjOffset).toISOString()
+  const nowIso = now.toISOString()
+
+  const oldPhoneNumber = order.phoneNumber
+  const oldOrderNo = order.externalOrderId
+
+  await db.update(orders).set({
+    phoneNumber: body.newPhoneNumber,
+    externalOrderId: body.newOrderNo,
+    expiresAt: newExpiresAt,
+    orderedAt: nowIso,
+  }).where(eq(orders.id, orderId))
+
+  await db.insert(auditLogs).values({
+    id: crypto.randomUUID(),
+    event: 'order.rebound',
+    entityType: 'order',
+    entityId: orderId,
+    meta: JSON.stringify({
+      orderId,
+      cdkCode: cdk.code,
+      oldPhoneNumber,
+      newPhoneNumber: body.newPhoneNumber,
+      oldOrderNo,
+      newOrderNo: body.newOrderNo,
+      newExpiresAt,
+      operatedBy: 'admin',
+    }),
+    createdAt: nowIso,
+  })
+
+  return c.json({ success: true, newExpiresAt })
 })
 
 app.get('/:id', async (c) => {

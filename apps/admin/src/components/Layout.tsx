@@ -4,6 +4,7 @@ const navItems = [
   { to: '/providers', label: 'Provider 管理' },
   { to: '/services', label: 'Service 管理' },
   { to: '/cdks', label: 'CDK 管理' },
+  { to: '/bound-orders', label: 'Bound 订单' },
   { to: '/pool-monitor', label: '号池监控' },
   { to: '/security', label: '安全日志' },
 ]
