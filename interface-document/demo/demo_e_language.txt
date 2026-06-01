@@ -1,0 +1,185 @@
+.版本 2
+.支持库 spec
+
+.程序集 窗口程序集_启动窗口
+.程序集变量 Config_UserID, 整数型
+.程序集变量 Config_UserCode, 整数型
+.程序集变量 Config_ApiKey, 文本型
+
+.子程序 __启动窗口_创建完毕
+    
+    ' 初始化配置
+    Config_UserID ＝ 5913
+    Config_UserCode ＝ 567449
+    Config_ApiKey ＝ “30f698e2bde90841a5d7f98b5f2194ae”
+    
+    ' 开始测试
+    测试API ()
+
+.子程序 测试API, , , 主测试流程
+    .局部变量 auth_result, 文本型
+    .局部变量 access_token, 文本型
+    .局部变量 balance_result, 文本型
+    
+    调试输出 (“正在登录...”)
+    ' 1. 第一步：调用 Auth 接口获取 access_token
+    auth_result ＝ Auth ()
+    调试输出 (“登录结果: ” ＋ auth_result)
+    
+    ' 简单的JSON解析获取 access_token，建议使用 类_json
+    access_token ＝ 文本_取出中间文本 (auth_result, #引号 ＋ “access_token” ＋ #引号 ＋ “:” ＋ #引号, #引号)
+    
+    .如果真 (access_token ≠ “”)
+        调试输出 (“Access Token: ” ＋ access_token)
+        
+        ' 2. 第二步：使用 access_token 调用其他接口
+        调试输出 (“正在获取余额...”)
+        balance_result ＝ Balance (access_token)
+        调试输出 (“余额结果: ” ＋ balance_result)
+        
+        ' 其他接口调用示例...
+        ' PlatformInfo (access_token)
+        ' TakeSmsPhoneNumber (128, 1, access_token)
+    .如果真结束
+
+.子程序 Auth, 文本型, , 登录授权 (Login/Auth)
+    ' 说明：获取 access_token，后续所有接口调用都需要使用此 token。
+    .局部变量 url, 文本型
+    .局部变量 post_data, 文本型
+    
+    url ＝ “https://api.yamasakisms.com/api/auth/login”
+    
+    ' 构造参数
+    ' 这里为了演示签名逻辑，实际建议使用 类_POST数据类 或 存取键值表
+    
+    返回 (发送请求 (url, “id”, 到文本 (Config_UserID), “usercode”, 到文本 (Config_UserCode)))
+
+.子程序 Balance, 文本型, , 查询余额 (Query Balance)
+    .参数 access_token, 文本型, , 接口访问凭证
+    .局部变量 url, 文本型
+    
+    url ＝ “https://api.yamasakisms.com/api/auth/balance”
+    返回 (发送请求 (url, “usercode”, 到文本 (Config_UserCode), “access_token”, access_token))
+
+.子程序 PlatformInfo, 文本型, , 获取平台信息 (Get Platform Info)
+    .参数 access_token, 文本型, , 接口访问凭证
+    .局部变量 url, 文本型
+    
+    url ＝ “https://api.yamasakisms.com/api/auth/platforminfo”
+    返回 (发送请求 (url, “usercode”, 到文本 (Config_UserCode), “access_token”, access_token, “platform_type”, “sms”))
+
+.子程序 TakeSmsPhoneNumber, 文本型, , 获取手机号 (Get Phone Number)
+    .参数 platform_id, 整数型, , 项目/平台ID
+    .参数 take_count, 整数型, , 获取数量
+    .参数 access_token, 文本型, , 接口访问凭证
+    .局部变量 url, 文本型
+    
+    url ＝ “https://api.yamasakisms.com/api/auth/takesmsphonenumber”
+    返回 (发送请求 (url, “usercode”, 到文本 (Config_UserCode), “access_token”, access_token, “platform_id”, 到文本 (platform_id), “take_count”, 到文本 (take_count)))
+
+.子程序 StopTakeSmsPhoneNumber, 文本型, , 停止获取手机号 (Stop Getting Phone Number)
+    .参数 order_no, 文本型, , 订单号
+    .参数 access_token, 文本型, , 接口访问凭证
+    .局部变量 url, 文本型
+    
+    url ＝ “https://api.yamasakisms.com/api/auth/stoptakesmsphonenumber”
+    返回 (发送请求 (url, “usercode”, 到文本 (Config_UserCode), “access_token”, access_token, “order_no”, order_no))
+
+.子程序 FreedSmsPhoneNumber, 文本型, , 释放手机号 (Free/Release Phone Number)
+    .参数 order_no, 文本型, , 订单号
+    .参数 access_token, 文本型, , 接口访问凭证
+    .局部变量 url, 文本型
+    
+    url ＝ “https://api.yamasakisms.com/api/auth/freedsmsphonenumber”
+    返回 (发送请求 (url, “usercode”, 到文本 (Config_UserCode), “access_token”, access_token, “order_no”, order_no))
+
+.子程序 AddBlackSmsPhoneNumber, 文本型, , 拉黑手机号 (Blacklist Phone Number)
+    .参数 order_no, 文本型, , 订单号
+    .参数 access_token, 文本型, , 接口访问凭证
+    .局部变量 url, 文本型
+    
+    url ＝ “https://api.yamasakisms.com/api/auth/addblacksmsphonenumber”
+    返回 (发送请求 (url, “usercode”, 到文本 (Config_UserCode), “access_token”, access_token, “order_no”, order_no))
+
+.子程序 GetCode, 文本型, , 获取验证码 (Get Verification Code)
+    .参数 order_no, 文本型, , 订单号
+    .参数 access_token, 文本型, , 接口访问凭证
+    .局部变量 url, 文本型
+    
+    url ＝ “https://api.yamasakisms.com/api/auth/getphonecode”
+    返回 (发送请求 (url, “usercode”, 到文本 (Config_UserCode), “access_token”, access_token, “order_no”, order_no))
+
+.子程序 发送请求, 文本型, , 发送HTTP请求 (Send HTTP Request)
+    .参数 url, 文本型
+    .参数 arg1_key, 文本型, 可空
+    .参数 arg1_val, 文本型, 可空
+    .参数 arg2_key, 文本型, 可空
+    .参数 arg2_val, 文本型, 可空
+    .参数 arg3_key, 文本型, 可空
+    .参数 arg3_val, 文本型, 可空
+    .参数 arg4_key, 文本型, 可空
+    .参数 arg4_val, 文本型, 可空
+    
+    .局部变量 params, StringStringMap ' 伪代码：字符串字典
+    .局部变量 timestamp, 文本型
+    .局部变量 sign, 文本型
+    .局部变量 post_str, 文本型
+    .局部变量 ret, 文本型
+    
+    ' 1. 收集参数
+    params.Add (arg1_key, arg1_val)
+    params.Add (arg2_key, arg2_val)
+    params.Add (arg3_key, arg3_val)
+    params.Add (arg4_key, arg4_val)
+    
+    timestamp ＝ 到文本 (取_现行时间戳 (真)) ' 精易模块命令
+    params.Add (“timestamp”, timestamp)
+    
+    ' 2. 计算签名
+    sign ＝ 计算签名 (params)
+    params.Add (“sign”, sign)
+    
+    ' 3. 构造POST字符串
+    post_str ＝ 构造POST数据 (params)
+    
+    ' 4. 发送请求 (使用精易模块 网页_访问_对象)
+    ' 注意：这里通常需要处理SSL证书问题，精易模块的 网页_访问_对象 默认支持
+    ret ＝ 网页_访问_对象 (url, 1, post_str, , , , , , , , , , , )
+    
+    返回 (ret)
+
+.子程序 计算签名, 文本型, , 生成签名 (Generate Signature)
+    .参数 params, StringStringMap
+    .局部变量 keys, 文本型, , "0"
+    .局部变量 key, 文本型
+    .局部变量 value, 文本型
+    .局部变量 str, 文本型
+    .局部变量 i, 整数型
+    
+    ' 规则: 按参数名排序 -> 拼接 key=value&... -> 拼接 API_KEY -> MD5
+    
+    ' 排序键名
+    params.GetKeys (keys)
+    数组_排序 (keys)
+    
+    str ＝ “”
+    .计次循环首 (取数组成员数 (keys), i)
+        key ＝ keys [i]
+        value ＝ params.Get (key)
+        .如果真 (value ≠ “” 且 value ≠ 字符 (0))
+            .如果真 (str ≠ “”)
+                str ＝ str ＋ “&”
+            .如果真结束
+            str ＝ str ＋ key ＋ “=” ＋ value
+        .如果真结束
+    .计次循环尾 ()
+    
+    str ＝ str ＋ Config_ApiKey
+    返回 (取数据摘要 (到字节集 (str)))
+
+' 说明：
+' 1. 本代码基于易语言和精易模块编写思路。
+' 2. 需要自行添加精易模块引用。
+' 3. StringStringMap 仅为示意，实际请使用 存取键值表 或 节点 类型。
+' 4. 网页_访问_对象 是精易模块中常用的网络请求命令，支持HTTPS。
+' 5. 取_现行时间戳 也是精易模块命令。
