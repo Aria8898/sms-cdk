@@ -152,9 +152,15 @@ async function post<T>(
     throw new Error(`yamasakisms HTTP ${res.status}: ${path}`)
   }
 
-  const json = await res.json() as YamasakismsResponse<T>
+  const rawText = await res.text()
+  // 大整数精度修复：JSON.parse 会把 >15 位整数截断，先把裸整数包成字符串再解析
+  const safeText = rawText.replace(
+    /([:\[,])\s*(\d{16,})\s*(?=[,\]\}])/g,
+    (_, prefix, num) => `${prefix}"${num}"`,
+  )
+  const json = JSON.parse(safeText) as YamasakismsResponse<T>
   console.log(`[yamasakisms] ${path} request params:`, JSON.stringify(allParams))
-  console.log(`[yamasakisms] ${path} raw response:`, JSON.stringify(json))
+  console.log(`[yamasakisms] ${path} raw response:`, rawText)
   // code=0 和 code=1 均视为成功（yamasakisms 部分接口用 code=0+msg="ok" 表示成功）
   if (json.code === 1 || json.code === 0) {
     // 空数组 + msg 含"过期/授权/token"= token 失效，抛特殊错误触发重试
@@ -311,8 +317,43 @@ export class YamasakismsAdapter implements BoundSmsProvider {
       throw new Error(`takeNumber: 无法解析响应，data=${JSON.stringify(raw)}`)
     }
 
-    // API 文档中没有单独获取手机号的接口，phone_number 将在首次 getphonecode 有数据时获取
-    return { orderNo, phoneNumber: '' }
+    // 取号后轮询 getphonecode，平台会在若干秒内返回手机号（即使尚无验证码）
+    const phoneNumber = await this.pollPhoneNumber(orderNo)
+    return { orderNo, phoneNumber }
+  }
+
+  /** 轮询 getphonecode 直到拿到手机号，最多等 1 分钟 */
+  private async pollPhoneNumber(orderNo: string, maxAttempts = 30, intervalMs = 2000): Promise<string> {
+    interface PhoneCodeResponse {
+      phone?: string
+      mobile?: string
+      phone_number?: string
+      [key: string]: unknown
+    }
+
+    for (let i = 0; i < maxAttempts; i++) {
+      if (i > 0) {
+        await new Promise(resolve => setTimeout(resolve, intervalMs))
+      }
+      try {
+        const raw = await this.postAuthenticated<PhoneCodeResponse | PhoneCodeResponse[]>(
+          '/api/auth/getphonecode',
+          { order_no: orderNo },
+        )
+        console.log(`[yamasakisms] pollPhoneNumber attempt ${i + 1}:`, JSON.stringify(raw))
+
+        const data = Array.isArray(raw) ? raw[0] : raw
+        const phone = data?.phone_number ?? data?.phone ?? data?.mobile
+        if (phone) {
+          return String(phone)
+        }
+      } catch (err) {
+        console.warn(`[yamasakisms] pollPhoneNumber attempt ${i + 1} failed:`, err)
+      }
+    }
+
+    console.warn('[yamasakisms] pollPhoneNumber: phone not found after max attempts')
+    return ''
   }
 
   async getLatestCode(orderNo: string): Promise<{ code: string; codeTime: string; phoneNumber?: string } | null> {
