@@ -157,6 +157,12 @@ async function post<T>(
   console.log(`[yamasakisms] ${path} raw response:`, JSON.stringify(json))
   // code=0 和 code=1 均视为成功（yamasakisms 部分接口用 code=0+msg="ok" 表示成功）
   if (json.code === 1 || json.code === 0) {
+    // 空数组 + msg 含"过期/授权/token"= token 失效，抛特殊错误触发重试
+    const msg = json.msg ?? ''
+    if (Array.isArray(json.data) && (json.data as unknown[]).length === 0
+      && (msg.includes('过期') || msg.includes('授权') || msg.toLowerCase().includes('token'))) {
+      throw new Error(`YAMASAKISMS_TOKEN_EXPIRED: ${msg}`)
+    }
     return json.data as T
   }
   throw new Error(`yamasakisms [code=${json.code}]: ${json.msg ?? '未知错误'}`)
@@ -179,6 +185,38 @@ export class YamasakismsAdapter implements BoundSmsProvider {
     private readonly apiKey: string,
   ) {
     this.db = getDb(d1)
+  }
+
+  /** 清除 DB 中存储的 token，强制下次重新登录 */
+  private async clearToken(): Promise<void> {
+    await this.db
+      .update(providerTokens)
+      .set({ expiresAt: '1970-01-01T00:00:00.000Z' })
+      .where(eq(providerTokens.providerSlug, PROVIDER_SLUG))
+      .catch(() => {})
+  }
+
+  /**
+   * 带 token 过期自动重试的 post 封装。
+   * 若 API 返回 token 过期错误，清除旧 token 并重新登录后重试一次。
+   */
+  private async postAuthenticated<T>(
+    path: string,
+    extraParams: Record<string, string | number>,
+  ): Promise<T> {
+    const token = await this.getToken()
+    try {
+      return await post<T>(path, { usercode: this.userCode, access_token: token, ...extraParams }, this.apiKey)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : ''
+      if (msg.startsWith('YAMASAKISMS_TOKEN_EXPIRED')) {
+        console.log('[yamasakisms] token expired, re-authenticating...')
+        await this.clearToken()
+        const newToken = await this.getToken()
+        return post<T>(path, { usercode: this.userCode, access_token: newToken, ...extraParams }, this.apiKey)
+      }
+      throw err
+    }
   }
 
   /** 获取有效的 access_token，必要时自动重新登录 */
@@ -252,23 +290,15 @@ export class YamasakismsAdapter implements BoundSmsProvider {
   // ─── BoundSmsProvider 实现 ─────────────────────────────────────────────────
 
   async takeNumber(platformId: string): Promise<{ orderNo: string; phoneNumber: string }> {
-    const token = await this.getToken()
-
     interface TakeNumberResponse {
       order_no?: string
       phone_number?: string
       [key: string]: unknown
     }
 
-    const raw = await post<TakeNumberResponse | TakeNumberResponse[]>(
+    const raw = await this.postAuthenticated<TakeNumberResponse | TakeNumberResponse[]>(
       '/api/auth/takesmsphonenumber',
-      {
-        usercode: this.userCode,
-        access_token: token,
-        platform_id: platformId,
-        take_count: 1,
-      },
-      this.apiKey,
+      { platform_id: platformId, take_count: 1 },
     )
 
     // data 为空数组 = 库存不足；data 为对象 = 成功
@@ -281,8 +311,6 @@ export class YamasakismsAdapter implements BoundSmsProvider {
   }
 
   async getLatestCode(orderNo: string): Promise<{ code: string; codeTime: string } | null> {
-    const token = await this.getToken()
-
     interface GetCodeResponse {
       sms_content?: string
       sms_time?: string
@@ -290,14 +318,9 @@ export class YamasakismsAdapter implements BoundSmsProvider {
       code_time?: string
     }
 
-    const raw = await post<GetCodeResponse | GetCodeResponse[]>(
+    const raw = await this.postAuthenticated<GetCodeResponse | GetCodeResponse[]>(
       '/api/auth/getphonecode',
-      {
-        usercode: this.userCode,
-        access_token: token,
-        order_no: orderNo,
-      },
-      this.apiKey,
+      { order_no: orderNo },
     )
 
     // data 为空数组或 null = 暂无验证码
@@ -318,11 +341,9 @@ export class YamasakismsAdapter implements BoundSmsProvider {
       currency?: string
       [key: string]: unknown
     }
-    const token = await this.getToken()
-    const raw = await post<BalanceResponse | BalanceResponse[]>(
+    const raw = await this.postAuthenticated<BalanceResponse | BalanceResponse[]>(
       '/api/auth/balance',
-      { usercode: this.userCode, access_token: token },
-      this.apiKey,
+      {},
     )
     const data = Array.isArray(raw) ? (raw[0] ?? {}) : (raw ?? {})
     return {
@@ -332,25 +353,17 @@ export class YamasakismsAdapter implements BoundSmsProvider {
   }
 
   async getPlatformInfo(): Promise<unknown[]> {
-    const token = await this.getToken()
-    const data = await post<unknown[] | unknown>(
+    const data = await this.postAuthenticated<unknown[] | unknown>(
       '/api/auth/platforminfo',
-      { usercode: this.userCode, access_token: token, platform_type: 'sms' },
-      this.apiKey,
+      { platform_type: 'sms' },
     )
     return Array.isArray(data) ? data : (data ? [data] : [])
   }
 
   async releaseNumber(orderNo: string): Promise<void> {
-    const token = await this.getToken()
-    await post(
+    await this.postAuthenticated(
       '/api/auth/freedsmsphonenumber',
-      {
-        usercode: this.userCode,
-        access_token: token,
-        order_no: orderNo,
-      },
-      this.apiKey,
+      { order_no: orderNo },
     ).catch(() => {
       // 释放失败不影响主流程，静默处理
     })
