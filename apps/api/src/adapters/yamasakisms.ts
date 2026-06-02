@@ -153,14 +153,13 @@ async function post<T>(
   }
 
   const json = await res.json() as YamasakismsResponse<T>
-  if (json.code !== 1 && json.code !== 0) {
-    // code=0 may indicate "no data" (not an error in all cases), handled by caller
-  }
+  console.log(`[yamasakisms] ${path} request params:`, JSON.stringify(allParams))
+  console.log(`[yamasakisms] ${path} raw response:`, JSON.stringify(json))
+  // code=0 和 code=1 均视为成功（yamasakisms 部分接口用 code=0+msg="ok" 表示成功）
   if (json.code === 1 || json.code === 0) {
-    // code=1 = success, code=0 = no data / see msg
     return json.data as T
   }
-  throw new Error(`yamasakisms error: ${json.msg} (code=${json.code})`)
+  throw new Error(`yamasakisms [code=${json.code}]: ${json.msg ?? '未知错误'}`)
 }
 
 // ─── Token 管理 ───────────────────────────────────────────────────────────────
@@ -256,11 +255,12 @@ export class YamasakismsAdapter implements BoundSmsProvider {
     const token = await this.getToken()
 
     interface TakeNumberResponse {
-      order_no: string
-      phone_number: string
+      order_no?: string
+      phone_number?: string
+      [key: string]: unknown
     }
 
-    const data = await post<TakeNumberResponse>(
+    const raw = await post<TakeNumberResponse | TakeNumberResponse[]>(
       '/api/auth/takesmsphonenumber',
       {
         usercode: this.userCode,
@@ -271,11 +271,13 @@ export class YamasakismsAdapter implements BoundSmsProvider {
       this.apiKey,
     )
 
+    // data 为空数组 = 库存不足；data 为对象 = 成功
+    const data = Array.isArray(raw) ? (raw.length > 0 ? raw[0] : null) : raw
     if (!data?.order_no || !data?.phone_number) {
-      throw new Error('yamasakisms takeNumber: 响应缺少 order_no 或 phone_number')
+      throw new Error('库存不足，暂无可用号码')
     }
 
-    return { orderNo: data.order_no, phoneNumber: data.phone_number }
+    return { orderNo: data.order_no!, phoneNumber: data.phone_number! }
   }
 
   async getLatestCode(orderNo: string): Promise<{ code: string; codeTime: string } | null> {
@@ -288,26 +290,18 @@ export class YamasakismsAdapter implements BoundSmsProvider {
       code_time?: string
     }
 
-    let data: GetCodeResponse | undefined
-    try {
-      data = await post<GetCodeResponse>(
-        '/api/auth/getphonecode',
-        {
-          usercode: this.userCode,
-          access_token: token,
-          order_no: orderNo,
-        },
-        this.apiKey,
-      )
-    } catch (err) {
-      // code=0 表示暂无验证码，不是错误
-      const msg = err instanceof Error ? err.message : String(err)
-      if (msg.includes('code=0') || msg.includes('no data') || msg.includes('No verification')) {
-        return null
-      }
-      throw err
-    }
+    const raw = await post<GetCodeResponse | GetCodeResponse[]>(
+      '/api/auth/getphonecode',
+      {
+        usercode: this.userCode,
+        access_token: token,
+        order_no: orderNo,
+      },
+      this.apiKey,
+    )
 
+    // data 为空数组或 null = 暂无验证码
+    const data = Array.isArray(raw) ? (raw.length > 0 ? raw[0] : null) : raw
     if (!data) return null
 
     const code = data.code ?? data.sms_content
@@ -316,6 +310,35 @@ export class YamasakismsAdapter implements BoundSmsProvider {
     if (!code) return null
 
     return { code, codeTime: codeTime ?? new Date().toISOString() }
+  }
+
+  async getBalance(): Promise<{ balance: number; currency: string }> {
+    interface BalanceResponse {
+      balance?: number | string
+      currency?: string
+      [key: string]: unknown
+    }
+    const token = await this.getToken()
+    const raw = await post<BalanceResponse | BalanceResponse[]>(
+      '/api/auth/balance',
+      { usercode: this.userCode, access_token: token },
+      this.apiKey,
+    )
+    const data = Array.isArray(raw) ? (raw[0] ?? {}) : (raw ?? {})
+    return {
+      balance: Number((data as BalanceResponse).balance ?? 0),
+      currency: String((data as BalanceResponse).currency ?? 'CNY'),
+    }
+  }
+
+  async getPlatformInfo(): Promise<unknown[]> {
+    const token = await this.getToken()
+    const data = await post<unknown[] | unknown>(
+      '/api/auth/platforminfo',
+      { usercode: this.userCode, access_token: token, platform_type: 'sms' },
+      this.apiKey,
+    )
+    return Array.isArray(data) ? data : (data ? [data] : [])
   }
 
   async releaseNumber(orderNo: string): Promise<void> {

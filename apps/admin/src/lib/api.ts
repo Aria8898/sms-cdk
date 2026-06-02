@@ -242,3 +242,20 @@ export const cdksApi = {
       method: 'POST', body: JSON.stringify(data),
     }),
 }
+
+// ---- Yamasakisms ----
+export interface YamasakismsBalance {
+  balance: number
+  currency: string
+}
+export interface YamasakismsPlatform {
+  platform_id?: number | string
+  platform_name?: string
+  price?: number | string
+  stock?: number | string
+  [key: string]: unknown
+}
+export const yamasakismsApi = {
+  balance: () => request<YamasakismsBalance>('/api/yamasakisms/balance'),
+  platformInfo: () => request<{ platforms: YamasakismsPlatform[] }>('/api/yamasakisms/platform-info'),
+}

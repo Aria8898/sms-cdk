@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
-  providersApi, servicesApi, poolApi,
+  providersApi, servicesApi, poolApi, yamasakismsApi,
   type Provider, type Service, type ServiceCategory,
   type PoolCountry, type BowerPosition, type PoolStatusResult,
+  type YamasakismsBalance, type YamasakismsPlatform,
 } from '../lib/api'
 
 // ─── 类型辅助 ─────────────────────────────────────────────────────────────────
@@ -61,6 +62,122 @@ function formatTime(iso: string): string {
   const d = new Date(iso)
   const p = (n: number) => String(n).padStart(2, '0')
   return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
+// ─── Yamasakisms 账户面板 ──────────────────────────────────────────────────────
+
+function YamasakismsPanel() {
+  const [balance, setBalance] = useState<YamasakismsBalance | null>(null)
+  const [platforms, setPlatforms] = useState<YamasakismsPlatform[] | null>(null)
+  const [balanceLoading, setBalanceLoading] = useState(false)
+  const [platformLoading, setPlatformLoading] = useState(false)
+  const [balanceError, setBalanceError] = useState('')
+  const [platformError, setPlatformError] = useState('')
+  const [showPlatforms, setShowPlatforms] = useState(false)
+
+  async function fetchBalance() {
+    setBalanceLoading(true)
+    setBalanceError('')
+    try {
+      const data = await yamasakismsApi.balance()
+      setBalance(data)
+    } catch (err) {
+      setBalanceError(err instanceof Error ? err.message : '查询失败')
+    } finally {
+      setBalanceLoading(false)
+    }
+  }
+
+  async function fetchPlatformInfo() {
+    setPlatformLoading(true)
+    setPlatformError('')
+    try {
+      const data = await yamasakismsApi.platformInfo()
+      setPlatforms(data.platforms)
+      setShowPlatforms(true)
+    } catch (err) {
+      setPlatformError(err instanceof Error ? err.message : '查询失败')
+    } finally {
+      setPlatformLoading(false)
+    }
+  }
+
+  return (
+    <div className="mb-6 bg-white rounded-xl border border-gray-200 p-4">
+      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Yamasakisms 账户</p>
+
+      <div className="flex items-center gap-3 flex-wrap mb-3">
+        <button
+          onClick={fetchBalance}
+          disabled={balanceLoading}
+          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+        >
+          {balanceLoading ? '查询中...' : '获取账户余额'}
+        </button>
+
+        <button
+          onClick={fetchPlatformInfo}
+          disabled={platformLoading}
+          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+        >
+          {platformLoading ? '查询中...' : '获取平台项目价格'}
+        </button>
+
+        {balance && (
+          <span className="text-sm text-gray-700">
+            余额：<span className="font-semibold text-gray-900">{balance.balance}</span>
+            <span className="text-gray-400 ml-1">{balance.currency}</span>
+          </span>
+        )}
+        {balanceError && (
+          <span className="text-sm text-red-600">{balanceError}</span>
+        )}
+        {platformError && (
+          <span className="text-sm text-red-600">{platformError}</span>
+        )}
+      </div>
+
+      {showPlatforms && platforms && (
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs text-gray-500">平台项目列表（共 {platforms.length} 条）</p>
+            <button
+              onClick={() => setShowPlatforms(false)}
+              className="text-xs text-gray-400 hover:text-gray-600"
+            >
+              收起
+            </button>
+          </div>
+          {platforms.length === 0 ? (
+            <p className="text-sm text-gray-400">暂无数据</p>
+          ) : (
+            <div className="overflow-auto max-h-64 rounded-lg border border-gray-200">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-200 sticky top-0">
+                    {Object.keys(platforms[0]).map(k => (
+                      <th key={k} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{k}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {platforms.map((p, i) => (
+                    <tr key={i} className="border-b border-gray-100 hover:bg-gray-50">
+                      {Object.values(p).map((v, j) => (
+                        <td key={j} className="px-3 py-2 text-gray-700 whitespace-nowrap font-mono text-xs">
+                          {String(v ?? '—')}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ─── Rank 说明卡片 ────────────────────────────────────────────────────────────
@@ -548,6 +665,9 @@ export default function PoolMonitor() {
           <span className="text-xs text-gray-400">上次查询：{formatTime(queriedAt)}</span>
         )}
       </div>
+
+      {/* Yamasakisms 账户信息 */}
+      <YamasakismsPanel />
 
       {/* Rank 说明（SMSBower 时显示） */}
       {isBower && <RankLegend />}

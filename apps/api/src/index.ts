@@ -14,6 +14,7 @@ import cdkRoute from './routes/cdk'
 import poolRoute from './routes/pool'
 import securityRoute from './routes/security'
 import auditRoute from './routes/audit'
+import yamasakismsRoute from './routes/yamasakisms'
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>()
 
@@ -38,6 +39,7 @@ app.route('/api/cdk', cdkRoute)
 app.route('/api/pool-status', poolRoute)
 app.route('/api/security', securityRoute)
 app.route('/api/audit-logs', auditRoute)
+app.route('/api/yamasakisms', yamasakismsRoute)
 
 app.get('/api/health', (c) => c.json({ status: 'ok', timestamp: new Date().toISOString() }))
 

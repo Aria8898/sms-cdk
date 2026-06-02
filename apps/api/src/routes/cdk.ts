@@ -21,16 +21,18 @@ import { log, writeAuditLog } from '../lib/logger'
 
 /**
  * 计算 bound CDK 的到期时间：取号当日 +1 日 07:00:00 (UTC+8)
- * 取号时间必须在 08:00–23:59 (UTC+8)，否则返回 null 表示拒绝取号。
+ * 取号时间必须在 openHour–23:59 (UTC+8)，否则返回 null 表示拒绝取号。
+ * @param nowUtc 当前 UTC 时间
+ * @param openHour 每日开放取号的起始小时（北京时间，0–23），默认 8
  */
-function calcBoundExpiresAt(nowUtc: Date): { expiresAt: string } | null {
+function calcBoundExpiresAt(nowUtc: Date, openHour = 8): { expiresAt: string } | null {
   // 转换为北京时间（UTC+8）
   const bjOffset = 8 * 60 * 60 * 1000
   const bjNow = new Date(nowUtc.getTime() + bjOffset)
   const bjHour = bjNow.getUTCHours()
 
-  // 00:00–07:59 拒绝取号
-  if (bjHour < 8) return null
+  // 00:00–(openHour-1) 拒绝取号
+  if (bjHour < openHour) return null
 
   // 次日 07:00:00 (UTC+8) = 次日 UTC 23:00:00
   const bjDate = new Date(Date.UTC(bjNow.getUTCFullYear(), bjNow.getUTCMonth(), bjNow.getUTCDate()))
@@ -579,14 +581,17 @@ app.post('/order', async (c) => {
       return c.json({ error: 'CDK 已取号，不可重复取号' }, 400)
     }
 
-    // 取号时间检查（北京时间 08:00–23:59）
+    // 取号时间检查（北京时间 openHour:00–23:59）
+    const openHour = Math.min(23, Math.max(0, parseInt(c.env.BOUND_OPEN_HOUR ?? '8', 10)))
     const nowDate = new Date()
-    const expiresResult = calcBoundExpiresAt(nowDate)
+    const expiresResult = calcBoundExpiresAt(nowDate, openHour)
     if (!expiresResult) {
-      return c.json({ error: '08:00 前不开放取号，请 08:00 后再来取号' }, 400)
+      return c.json({ error: `${String(openHour).padStart(2, '0')}:00 前不开放取号，请 ${String(openHour).padStart(2, '0')}:00 后再来取号` }, 400)
     }
 
     // 解析 service（用于获取 providerSlug 和 externalServiceId = yamasakisms platform_id）
+    // bound 型必须使用支持 BoundSmsProvider 的 provider（目前仅 yamasakisms）
+    const boundProviderSlug = 'yamasakisms'
     const [boundService] = await db
       .select({
         id: services.id,
@@ -596,25 +601,11 @@ app.post('/order', async (c) => {
       .from(services)
       .leftJoin(providers, eq(providers.id, services.providerId))
       .where(cdkRow.categoryId
-        ? and(eq(services.categoryId, cdkRow.categoryId), eq(services.isDefault, true))
-        : eq(services.id, cdkRow.serviceId))
+        ? and(eq(services.categoryId, cdkRow.categoryId), eq(providers.slug, boundProviderSlug))
+        : and(eq(services.id, cdkRow.serviceId), eq(providers.slug, boundProviderSlug)))
       .limit(1)
 
-    // 若无 isDefault，回退到第一条
-    const [effectiveService] = boundService
-      ? [boundService]
-      : await db
-          .select({
-            id: services.id,
-            externalServiceId: services.externalServiceId,
-            providerSlug: providers.slug,
-          })
-          .from(services)
-          .leftJoin(providers, eq(providers.id, services.providerId))
-          .where(cdkRow.categoryId
-            ? eq(services.categoryId, cdkRow.categoryId)
-            : eq(services.id, cdkRow.serviceId))
-          .limit(1)
+    const effectiveService = boundService
 
     if (!effectiveService?.providerSlug || !effectiveService.externalServiceId) {
       return c.json({ error: '找不到可用的服务提供商，请联系管理员' }, 500)

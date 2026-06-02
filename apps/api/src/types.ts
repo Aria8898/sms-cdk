@@ -11,6 +11,8 @@ export type Bindings = {
   NOTIFY_WEBHOOK_URL?: string
   /** 接码 API 每分钟每 CDK 最大请求次数，默认 20 */
   RATE_LIMIT_CODE_API?: string
+  /** bound CDK 每日开放取号的起始小时（北京时间 UTC+8，0–23），默认 8 */
+  BOUND_OPEN_HOUR?: string
   /** yamasakisms 账户 user_id */
   YAMASAKISMS_USER_ID?: string
   /** yamasakisms 账户 user_code */

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { cdkApi, mockConfig } from '../lib/api'
 import type { PoolOption, MockScenario, ValidateError } from '../lib/api'
 
@@ -118,6 +119,7 @@ function RegionA({ phase, data, onValidate, onClear, isClearing }: RegionAProps)
   const [isLoading, setIsLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
   const [expiredInfo, setExpiredInfo] = useState<{ expiresAt?: string; lastOrderedAt?: string } | null>(null)
+  const navigate = useNavigate()
 
   const isValid = CDK_REGEX.test(inputValue)
   const hasInput = inputValue.trim().length > 0
@@ -129,6 +131,12 @@ function RegionA({ phase, data, onValidate, onClear, isClearing }: RegionAProps)
     setExpiredInfo(null)
     try {
       const result = await cdkApi.validate(inputValue.trim())
+
+      // 号码绑定型 CDK → 跳转到专属页面
+      if (result.cdkType === 'bound') {
+        navigate(`/bound?code=${encodeURIComponent(inputValue.trim())}`)
+        return
+      }
 
       // 会话恢复：validate 返回 activeOrder
       if (result.activeOrder) {
