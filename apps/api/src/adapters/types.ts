@@ -53,10 +53,17 @@ export interface SmsProvider {
 
 /** 号码绑定型平台接口（yamasakisms 等），取号即消耗，持续接码 */
 export interface BoundSmsProvider {
-  /** 取号，返回 order_no 和手机号 */
+  /**
+   * 取号，返回 order_no 和手机号。
+   * 注意：部分平台（如 yamasakisms）不在取号时返回手机号，phoneNumber 可能为空字符串，
+   * 实际手机号将在首次 getLatestCode 有数据时从响应中提取。
+   */
   takeNumber(platformId: string): Promise<{ orderNo: string; phoneNumber: string }>
-  /** 获取最新验证码，无码时返回 null */
-  getLatestCode(orderNo: string): Promise<{ code: string; codeTime: string } | null>
+  /**
+   * 获取最新验证码，无码时返回 null。
+   * 响应中如包含手机号（phoneNumber），调用方应同步更新订单记录。
+   */
+  getLatestCode(orderNo: string): Promise<{ code: string; codeTime: string; phoneNumber?: string } | null>
   /** 释放号码（目前仅管理员手动处理，此方法预留备用） */
   releaseNumber(orderNo: string): Promise<void>
 }

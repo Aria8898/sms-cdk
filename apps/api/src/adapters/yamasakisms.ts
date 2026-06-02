@@ -290,32 +290,42 @@ export class YamasakismsAdapter implements BoundSmsProvider {
   // ─── BoundSmsProvider 实现 ─────────────────────────────────────────────────
 
   async takeNumber(platformId: string): Promise<{ orderNo: string; phoneNumber: string }> {
-    interface TakeNumberResponse {
-      order_no?: string
-      phone_number?: string
-      [key: string]: unknown
-    }
-
-    const raw = await this.postAuthenticated<TakeNumberResponse | TakeNumberResponse[]>(
+    // API 返回 data=[order_no_integer] 格式
+    const raw = await this.postAuthenticated<number[] | { order_no?: string; phone_number?: string }>(
       '/api/auth/takesmsphonenumber',
       { platform_id: platformId, take_count: 1 },
     )
 
-    // data 为空数组 = 库存不足；data 为对象 = 成功
-    const data = Array.isArray(raw) ? (raw.length > 0 ? raw[0] : null) : raw
-    if (!data?.order_no || !data?.phone_number) {
+    // data 为空数组 = 库存不足
+    if (Array.isArray(raw) && raw.length === 0) {
       throw new Error('库存不足，暂无可用号码')
     }
 
-    return { orderNo: data.order_no!, phoneNumber: data.phone_number! }
+    // data=[order_no] 格式：取第一个元素作为 order_no
+    let orderNo: string
+    if (Array.isArray(raw)) {
+      orderNo = String(raw[0])
+    } else if (raw && typeof raw === 'object' && 'order_no' in raw && raw.order_no) {
+      orderNo = raw.order_no
+    } else {
+      throw new Error(`takeNumber: 无法解析响应，data=${JSON.stringify(raw)}`)
+    }
+
+    // API 文档中没有单独获取手机号的接口，phone_number 将在首次 getphonecode 有数据时获取
+    return { orderNo, phoneNumber: '' }
   }
 
-  async getLatestCode(orderNo: string): Promise<{ code: string; codeTime: string } | null> {
+  async getLatestCode(orderNo: string): Promise<{ code: string; codeTime: string; phoneNumber?: string } | null> {
     interface GetCodeResponse {
       sms_content?: string
       sms_time?: string
       code?: string
       code_time?: string
+      // 手机号可能出现在有数据的响应里
+      phone?: string
+      mobile?: string
+      phone_number?: string
+      [key: string]: unknown
     }
 
     const raw = await this.postAuthenticated<GetCodeResponse | GetCodeResponse[]>(
@@ -329,10 +339,15 @@ export class YamasakismsAdapter implements BoundSmsProvider {
 
     const code = data.code ?? data.sms_content
     const codeTime = data.code_time ?? data.sms_time
+    const phoneNumber = data.phone_number ?? data.phone ?? data.mobile
 
     if (!code) return null
 
-    return { code, codeTime: codeTime ?? new Date().toISOString() }
+    return {
+      code,
+      codeTime: codeTime ?? new Date().toISOString(),
+      ...(phoneNumber ? { phoneNumber: String(phoneNumber) } : {}),
+    }
   }
 
   async getBalance(): Promise<{ balance: number; currency: string }> {

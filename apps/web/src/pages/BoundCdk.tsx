@@ -314,9 +314,15 @@ export default function BoundCdk() {
             <div className="space-y-3">
               <div>
                 <p className="text-xs text-gray-500 mb-0.5">手机号码</p>
-                <p className="text-lg font-semibold text-gray-900 tracking-wide">
-                  {pageState.order.phoneNumber ?? "—"}
-                </p>
+                {pageState.order.phoneNumber ? (
+                  <p className="text-lg font-semibold text-gray-900 tracking-wide">
+                    {pageState.order.phoneNumber}
+                  </p>
+                ) : (
+                  <p className="text-sm text-gray-400 italic">
+                    号码获取中，请通过接码 API 查询…
+                  </p>
+                )}
               </div>
 
               <div>

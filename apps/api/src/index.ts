@@ -176,6 +176,13 @@ app.get('/api/:code', async (c) => {
           receivedAt: result.codeTime,
         })
       }
+
+      // 若订单尚无手机号且本次响应携带了 phoneNumber，写入订单
+      if (result.phoneNumber && !boundOrder.phoneNumber) {
+        await db.update(orders)
+          .set({ phoneNumber: result.phoneNumber })
+          .where(eq(orders.id, boundOrder.id))
+      }
     }
 
     const responseBody = result
